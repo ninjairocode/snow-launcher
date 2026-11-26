@@ -90,8 +90,17 @@ Resultados dos experimentos da seção 13 do `project.md` e de outras observaç�
    ```
    **Conclusão:** o problema não é exclusivo da suspensão. Qualquer queda longa o bastante deixa o jogo assim. A vigilância das conexões passou a rodar durante toda a sessão de jogo, com limite de 6 retransmissões.
 
+7. **Vigilância contínua, cabo fora por ~90 s** (`RUST_LOG=snowd=debug`): durante a queda, as amostras pararam de contar (`network is down`). Quando a rede voltou, todas as conexões do WoW estavam saudáveis (`max_retransmits=0`) e **não houve aviso**, que é o correto. O jogo manteve a sessão.
+   ```
+   16:51:37 DEBUG game connection sample sockets=16 looking_dead=0 max_retransmits=3
+   16:51:42 DEBUG network is down; game retransmissions do not count
+   16:53:12 DEBUG game connection sample sockets=14 looking_dead=0 max_retransmits=0
+   ```
+   **Conclusão parcial:** o servidor do WoW tolera pelo menos ~90 s sem resposta. A sessão meio aberta do item 6 veio de uma queda mais longa.
+
 ### Em aberto
 
-- [ ] Por quanto tempo o servidor do WoW mantém a sessão sem resposta? (Tirar o cabo e cronometrar até o jogo mostrar a desconexão, ou até ele voltar ao recolocar.)
+- [ ] Por quanto tempo o servidor do WoW mantém a sessão? Já se sabe que é **pelo menos ~90 s**; falta achar o limite.
+- [ ] Confirmar que a vigilância contínua avisa num caso real de conexão meio aberta (queda longa).
 - [ ] Suspensão longa com o WoW aberto: o jogo de fato perde a conexão? Em quanto tempo ele mesmo percebe? A checagem de retransmissões detecta isso?
 - [ ] Deixar o PC ocioso além do tempo de suspensão automática com o WoW aberto: confirmar que a tela apaga mas o PC não suspende.
