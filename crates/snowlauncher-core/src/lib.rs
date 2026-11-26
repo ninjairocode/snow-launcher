@@ -3,6 +3,8 @@
 //! This crate performs no direct IO. Anything that touches the outside
 //! world is expressed as a trait here and implemented in another crate.
 
+pub mod config;
+pub mod desktop;
 pub mod network;
 pub mod process;
 pub mod sleep;

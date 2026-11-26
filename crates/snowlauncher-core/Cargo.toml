@@ -8,6 +8,10 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_ignored = "0.1.14"
+thiserror = "2"
+toml = "1.2.3"
 
 [lints]
 workspace = true
