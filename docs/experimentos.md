@@ -22,3 +22,22 @@ Resultados dos experimentos da seção 13 do `project.md` e de outras observaç�
 
 - **Encerrar "todos os processos do prefixo" inclui o launcher do lado Linux.** No prefixo do próprio Snow isso será o `umu-run` que o próprio Snow iniciou. O encerramento deve começar pelos processos Windows (`wineserver -k` com o mesmo runtime) e deixar que a árvore do launcher termine sozinha. Só depois disso entram `SIGTERM`/`SIGKILL` (seção 9.2). A validar no E4.
 - O `environ` de processos de outros usuários dá "permissão negada". Isso é esperado e já é ignorado.
+
+## O2 – Sinal de suspender/acordar do logind (início do E4)
+
+**Data:** 2026-11-26
+**Ambiente:** o mesmo do O1, com o Battle.net aberto. `snowd` rodando via `cargo run`, suspensão por `systemctl suspend`.
+
+### Resultados
+
+1. O `PrepareForSleep` chega ao `snowd` sem nenhuma permissão extra, só como usuário comum no barramento do sistema:
+   ```
+   13:55:59 INFO snowd: system is going to sleep
+   13:56:15 INFO snowd: system woke up
+   ```
+2. Depois de acordar, o Battle.net e o Agent **continuaram com os mesmos PIDs** (97076 e 97140). O problema de "não reconectar" não é processo morto, é o processo vivo sem conexão. Por isso a detecção não pode depender só de "o processo existe".
+
+### Em aberto
+
+- [ ] O Battle.net reconectou sozinho depois desta suspensão curta (cerca de 15 s)? E depois de uma longa (mais de 10 min), ou com troca de rede?
+- [ ] Reiniciar o Battle.net e o Agent depois de acordar resolve? E com o WoW aberto?
