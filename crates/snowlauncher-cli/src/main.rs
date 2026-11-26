@@ -64,7 +64,7 @@ fn render_status(prefix: &Path, processes: &[&ProcessInfo]) -> String {
     let running = |role: ProcessRole| -> String {
         let pids: Vec<String> = processes
             .iter()
-            .filter(|p| ProcessRole::from_comm(&p.name) == role)
+            .filter(|p| ProcessRole::of(p) == role)
             .map(|p| p.pid.0.to_string())
             .collect();
         if pids.is_empty() {
@@ -81,13 +81,20 @@ fn render_status(prefix: &Path, processes: &[&ProcessInfo]) -> String {
     let _ = writeln!(out, "Agent:      {}", running(ProcessRole::Agent));
     let _ = writeln!(out, "Processes:  {}", processes.len());
     for process in processes {
-        let role = match ProcessRole::from_comm(&process.name) {
+        let role = match ProcessRole::of(process) {
             ProcessRole::BattleNet => "Battle.net",
+            ProcessRole::BattleNetHelper => "Battle.net (helper)",
             ProcessRole::Agent => "Agent",
             ProcessRole::WineService => "Wine",
+            ProcessRole::Launcher => "launcher",
             ProcessRole::Other => "other",
         };
-        let _ = writeln!(out, "  {:>7}  {:<16} {role}", process.pid.0, process.name);
+        let _ = writeln!(
+            out,
+            "  {:>7}  {:<22} {role}",
+            process.pid.0,
+            process.display_name()
+        );
     }
     out
 }
@@ -97,10 +104,11 @@ mod tests {
     use super::*;
     use snowlauncher_core::process::Pid;
 
-    fn process(pid: u32, name: &str) -> ProcessInfo {
+    fn process(pid: u32, comm: &str, cmdline: &[&str]) -> ProcessInfo {
         ProcessInfo {
             pid: Pid(pid),
-            name: name.to_owned(),
+            name: comm.to_owned(),
+            cmdline: cmdline.iter().map(|arg| (*arg).to_owned()).collect(),
             wineprefix: None,
         }
     }
@@ -113,17 +121,20 @@ mod tests {
 
     #[test]
     fn renders_running_battlenet() {
-        let bnet = process(200, "Battle.net.exe");
-        let server = process(100, "wineserver");
-        let out = render_status(Path::new("/pfx"), &[&server, &bnet]);
+        let exe = r"C:\Program Files (x86)\Battle.net\Battle.net.exe";
+        let server = process(100, "wineserver", &[]);
+        let bnet = process(200, "CrBrowserMain", &[exe]);
+        let gpu = process(201, "CrGpuMain", &[exe, "--type=gpu-process"]);
+        let out = render_status(Path::new("/pfx"), &[&server, &bnet, &gpu]);
         assert_eq!(
             out,
             "Prefix:     /pfx\n\
              Battle.net: running (pid 200)\n\
              Agent:      not running\n\
-             Processes:  2\n\
-             \x20     100  wineserver       Wine\n\
-             \x20     200  Battle.net.exe   Battle.net\n"
+             Processes:  3\n\
+             \x20     100  wineserver             Wine\n\
+             \x20     200  Battle.net.exe         Battle.net\n\
+             \x20     201  Battle.net.exe         Battle.net (helper)\n"
         );
     }
 

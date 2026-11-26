@@ -78,11 +78,26 @@ fn read_process(dir: &Path, pid: Pid) -> Option<ProcessInfo> {
         .and_then(|environ| env_var(&environ, b"WINEPREFIX").map(<[u8]>::to_vec))
         .map(|value| canonicalize_if_absolute(PathBuf::from(OsStr::from_bytes(&value))));
 
+    // Kernel threads and zombies have an empty cmdline; that is fine.
+    let cmdline = fs::read(dir.join("cmdline"))
+        .map(|raw| parse_cmdline(&raw))
+        .unwrap_or_default();
+
     Some(ProcessInfo {
         pid,
         name,
+        cmdline,
         wineprefix,
     })
+}
+
+/// Splits a NUL-separated `/proc/<pid>/cmdline`. Empty entries are dropped:
+/// Wine rewrites the command line in place and pads it with NULs.
+fn parse_cmdline(raw: &[u8]) -> Vec<String> {
+    raw.split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+        .collect()
 }
 
 /// Finds `key` in a NUL-separated `KEY=value` list, as in `/proc/<pid>/environ`.
@@ -107,6 +122,21 @@ fn canonicalize_if_absolute(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cmdline_drops_wine_padding() {
+        // Captured from a real Battle.net process under GE-Proton.
+        let raw =
+            b"C:\\Program Files (x86)\\Battle.net\\Battle.net.exe\0--type=gpu-process\0\0\0\0";
+        assert_eq!(
+            parse_cmdline(raw),
+            [
+                r"C:\Program Files (x86)\Battle.net\Battle.net.exe",
+                "--type=gpu-process"
+            ]
+        );
+        assert!(parse_cmdline(b"").is_empty());
+    }
 
     #[test]
     fn env_var_finds_exact_key() {

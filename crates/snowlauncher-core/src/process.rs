@@ -16,28 +16,52 @@ pub struct Pid(pub u32);
 pub struct ProcessInfo {
     pub pid: Pid,
     /// Short process name (`/proc/<pid>/comm`). Only for display and logs,
-    /// never for deciding which processes to touch.
+    /// never for deciding which processes to touch. Unreliable for Wine
+    /// programs: Chromium-based ones such as Battle.net rename it to
+    /// `CrBrowserMain`, `CrRendererMain` etc.
     pub name: String,
+    /// Command line (`/proc/<pid>/cmdline`), decoded lossily, without empty
+    /// entries. For Wine programs the first entry is the Windows path of the
+    /// executable, e.g. `C:\Program Files (x86)\Battle.net\Battle.net.exe`.
+    pub cmdline: Vec<String>,
     /// Value of `WINEPREFIX`, if the process has one and it could be read.
     pub wineprefix: Option<PathBuf>,
 }
 
-/// What a process is, as far as its name tells.
+impl ProcessInfo {
+    /// Best human-readable name: the executable file name from the command
+    /// line (e.g. `Battle.net.exe`), or `comm` if there is no command line.
+    pub fn display_name(&self) -> &str {
+        match self.cmdline.first() {
+            Some(argv0) => file_name(argv0),
+            None => &self.name,
+        }
+    }
+}
+
+/// What a process is, as far as its command line tells.
 ///
 /// Only for display and status. Which processes Snow Launcher may touch is
 /// always decided by prefix (see [`processes_in_prefix`]), never by role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessRole {
+    /// The main Battle.net client process.
     BattleNet,
+    /// Chromium child processes of the client (GPU, renderer, utility).
+    BattleNetHelper,
     Agent,
     /// Wine/Proton infrastructure that runs in every prefix.
     WineService,
-    /// Anything else: usually a game, or something not yet known.
+    /// Linux-side launcher or runtime (umu-run, pressure-vessel, Lutris
+    /// wrapper...). These inherit `WINEPREFIX` but are not Wine programs.
+    Launcher,
+    /// Any other Windows program: usually a game.
     Other,
 }
 
 // TODO(v0.4): these lists will come from the quirks repository.
-const BATTLENET_NAMES: &[&str] = &["Battle.net.exe", "Battle.net Helper.exe"];
+const BATTLENET_EXE: &str = "Battle.net.exe";
+const BATTLENET_HELPER_NAMES: &[&str] = &["Battle.net Helper.exe"];
 const AGENT_NAMES: &[&str] = &["Agent.exe"];
 const WINE_SERVICE_NAMES: &[&str] = &[
     "wineserver",
@@ -46,32 +70,81 @@ const WINE_SERVICE_NAMES: &[&str] = &[
     "plugplay.exe",
     "svchost.exe",
     "rpcss.exe",
+    "lsass.exe",
     "explorer.exe",
     "tabtip.exe",
     "conhost.exe",
     "start.exe",
     "rundll32.exe",
-    // Proton's helper that stands in for the Steam client.
+    // Proton/umu helpers.
     "steam.exe",
+    "umu.exe",
+    // Wine's accessibility bridge (Proton).
+    "xalia.exe",
 ];
+
+/// Chromium marks its child processes with `--type=gpu-process` etc.
+const CHROMIUM_CHILD_FLAG: &str = "--type=";
 
 /// The kernel keeps only the first 15 bytes of a process name in `comm`.
 const COMM_MAX_LEN: usize = 15;
 
 impl ProcessRole {
-    /// Classifies a process by its `comm` name, accounting for truncation.
-    pub fn from_comm(comm: &str) -> Self {
-        let in_list = |names: &[&str]| names.iter().any(|name| comm_matches(comm, name));
-        if in_list(BATTLENET_NAMES) {
-            Self::BattleNet
-        } else if in_list(AGENT_NAMES) {
-            Self::Agent
-        } else if in_list(WINE_SERVICE_NAMES) {
-            Self::WineService
-        } else {
-            Self::Other
+    /// Classifies a process, preferring its command line over `comm`.
+    pub fn of(process: &ProcessInfo) -> Self {
+        match process.cmdline.split_first() {
+            Some((argv0, args)) => Self::from_command(argv0, args),
+            None => Self::from_comm(&process.name),
         }
     }
+
+    fn from_command(argv0: &str, args: &[String]) -> Self {
+        // Wine uses `\` (sometimes `/`); Linux programs use `/`.
+        let exe = file_name(argv0);
+        if exe.eq_ignore_ascii_case(BATTLENET_EXE)
+            && args.iter().any(|arg| arg.starts_with(CHROMIUM_CHILD_FLAG))
+        {
+            Self::BattleNetHelper
+        } else if let Some(role) = Self::from_known_name(|name| exe.eq_ignore_ascii_case(name)) {
+            role
+        } else if is_windows_path(argv0) {
+            Self::Other
+        } else {
+            Self::Launcher
+        }
+    }
+
+    /// Fallback when the command line is not available.
+    fn from_comm(comm: &str) -> Self {
+        Self::from_known_name(|name| comm_matches(comm, name)).unwrap_or(Self::Other)
+    }
+
+    fn from_known_name(matches: impl Fn(&str) -> bool) -> Option<Self> {
+        let any = |names: &[&str]| names.iter().any(|name| matches(name));
+        if matches(BATTLENET_EXE) {
+            Some(Self::BattleNet)
+        } else if any(BATTLENET_HELPER_NAMES) {
+            Some(Self::BattleNetHelper)
+        } else if any(AGENT_NAMES) {
+            Some(Self::Agent)
+        } else if any(WINE_SERVICE_NAMES) {
+            Some(Self::WineService)
+        } else {
+            None
+        }
+    }
+}
+
+/// Last component of a Windows (`\` or `/`) or Linux path.
+fn file_name(path: &str) -> &str {
+    path.rsplit(['\\', '/']).next().unwrap_or(path)
+}
+
+/// `C:\...`, `c:/...` or `\\?\...`: how Wine shows Windows executables.
+fn is_windows_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    let drive = matches!(bytes, [letter, b':', ..] if letter.is_ascii_alphabetic());
+    drive || path.starts_with(r"\\")
 }
 
 /// Whether `comm` is `full_name` as the kernel would store it (truncated).
@@ -116,6 +189,7 @@ mod tests {
         ProcessInfo {
             pid: Pid(pid),
             name: format!("proc{pid}"),
+            cmdline: Vec::new(),
             wineprefix: wineprefix.map(PathBuf::from),
         }
     }
@@ -168,29 +242,89 @@ mod tests {
         assert!(matching_pids(&processes, PREFIX).is_empty());
     }
 
+    /// Role of a process given only its command line (as Wine shows it).
+    fn role(cmdline: &[&str]) -> ProcessRole {
+        ProcessRole::of(&ProcessInfo {
+            pid: Pid(1),
+            name: "CrBrowserMain".to_owned(),
+            cmdline: cmdline.iter().map(|arg| (*arg).to_owned()).collect(),
+            wineprefix: None,
+        })
+    }
+
+    // Command lines below were captured from a real Lutris + GE-Proton prefix.
+
     #[test]
-    fn classifies_known_processes() {
+    fn battlenet_main_process_is_found_despite_chromium_comm() {
+        let bnet = r"C:\Program Files (x86)\Battle.net\Battle.net.exe";
+        assert_eq!(role(&[bnet]), ProcessRole::BattleNet);
         assert_eq!(
-            ProcessRole::from_comm("Battle.net.exe"),
-            ProcessRole::BattleNet
+            role(&[bnet, "--type=gpu-process", "--no-sandbox"]),
+            ProcessRole::BattleNetHelper
         );
-        assert_eq!(ProcessRole::from_comm("Agent.exe"), ProcessRole::Agent);
-        assert_eq!(
-            ProcessRole::from_comm("wineserver"),
-            ProcessRole::WineService
-        );
-        assert_eq!(ProcessRole::from_comm("Wow.exe"), ProcessRole::Other);
     }
 
     #[test]
-    fn classifies_truncated_comm() {
-        // "Battle.net Helper.exe" is stored by the kernel as its first 15 bytes.
+    fn agent_with_versioned_folder_and_forward_slashes() {
+        let agent = "C:/ProgramData/Battle.net/Agent/Agent.9886/Agent.exe";
+        assert_eq!(role(&[agent, "--session=1"]), ProcessRole::Agent);
+    }
+
+    #[test]
+    fn wine_services_are_recognized() {
         assert_eq!(
-            ProcessRole::from_comm("Battle.net Help"),
-            ProcessRole::BattleNet
+            role(&[r"C:\windows\system32\winedevice.exe"]),
+            ProcessRole::WineService
         );
+        assert_eq!(
+            role(&[r"c:\windows\system32\umu.exe", "/x"]),
+            ProcessRole::WineService
+        );
+        assert_eq!(
+            role(&[r"\\?\X:\proton\files\share\xalia\xalia.exe"]),
+            ProcessRole::WineService
+        );
+        assert_eq!(
+            role(&["/opt/GE-Proton/files/bin/wineserver"]),
+            ProcessRole::WineService
+        );
+    }
+
+    #[test]
+    fn linux_side_launchers_are_not_windows_programs() {
+        assert_eq!(
+            role(&["python3", "/home/u/umu/umu-run"]),
+            ProcessRole::Launcher
+        );
+        assert_eq!(
+            role(&["/usr/bin/python3", "/usr/share/lutris/bin/lutris-wrapper"]),
+            ProcessRole::Launcher
+        );
+    }
+
+    #[test]
+    fn unknown_windows_program_is_other() {
+        assert_eq!(
+            role(&[r"G:\World of Warcraft\_retail_\Wow.exe"]),
+            ProcessRole::Other
+        );
+    }
+
+    #[test]
+    fn falls_back_to_comm_without_cmdline() {
+        let by_comm = |comm: &str| {
+            ProcessRole::of(&ProcessInfo {
+                pid: Pid(1),
+                name: comm.to_owned(),
+                cmdline: Vec::new(),
+                wineprefix: None,
+            })
+        };
+        assert_eq!(by_comm("Agent.exe"), ProcessRole::Agent);
+        // "Battle.net Helper.exe" is stored by the kernel as its first 15 bytes.
+        assert_eq!(by_comm("Battle.net Help"), ProcessRole::BattleNetHelper);
         // A prefix shorter than 15 bytes is not a truncation.
-        assert_eq!(ProcessRole::from_comm("Battle.net"), ProcessRole::Other);
+        assert_eq!(by_comm("Battle.net"), ProcessRole::Other);
     }
 
     #[test]
