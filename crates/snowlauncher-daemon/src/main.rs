@@ -13,6 +13,7 @@
 
 mod connections;
 mod games;
+mod instance;
 mod logind;
 mod networkmanager;
 mod notifications;
@@ -37,6 +38,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::connections::ConnectionMonitor;
 use crate::games::{GameGuard, watch_games};
+use crate::instance::default_lock_path;
 use crate::logind::LogindSleepMonitor;
 use crate::networkmanager::NmNetworkMonitor;
 use crate::notifications::DesktopNotifier;
@@ -72,6 +74,11 @@ async fn main() -> Result<()> {
         .init();
 
     info!(version = env!("CARGO_PKG_VERSION"), "snowd starting");
+
+    // Held until `main` returns; the kernel releases it if we crash.
+    let lock_path = default_lock_path()
+        .context("XDG_RUNTIME_DIR is not set; snowd must run inside a user session")?;
+    let _instance = instance::acquire(&lock_path)?;
 
     let config = match args.config.or_else(default_config_path) {
         Some(path) => load_config(&path),
