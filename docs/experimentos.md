@@ -44,8 +44,38 @@ Resultados dos experimentos da seção 13 do `project.md` e de outras observaç�
    ```
    O limite de 60 s do `snowd` deixa folga. Qualquer ação no Battle.net logo após acordar, antes desses ~5 s, encontraria a rede fora.
 
-### Em aberto
+### Em aberto (O2)
 
 - [x] O Battle.net reconectou sozinho depois desta suspensão curta (cerca de 15 s)? **Sim, aparentemente.**
 - [ ] E depois de uma suspensão longa (mais de 10 min), de uma hibernação ou de uma troca de rede (outro Wi-Fi)?
 - [ ] Reiniciar o Battle.net e o Agent depois de acordar resolve? E com o WoW aberto?
+
+## O3 – Bloquear suspensão automática com o WoW aberto
+
+**Data:** 2026-11-26
+**Ambiente:** o mesmo do O1. `snowd --prefix ~/Games/battlenet`, sem `config.toml` (padrão), WoW retail aberto pelo Battle.net.
+
+### Resultados
+
+1. O WoW retail foi reconhecido como jogo (`Wow.exe`) e a inibição foi aplicada e liberada com o jogo aberto e fechado:
+   ```
+   14:41:14 INFO game running games=["World of Warcraft"]
+   14:41:14 INFO automatic suspend blocked
+   14:41:49 INFO no game running
+   14:41:49 INFO automatic suspend allowed again
+   ```
+2. No GNOME, o portal registra a inibição com a flag *Suspend* (4) e sem *Idle* (8), conforme o teste `real_portal_inhibits_and_releases_suspend_on_gnome`. O registro leva ~300 ms para aparecer.
+
+3. **Suspensão manual curta (14 s) com o WoW aberto:** a notificação apareceu ao acordar, mas **o jogo continuou online**. Foi um falso positivo. A rede voltou em 8,6 s.
+   ```
+   14:51:57 INFO system is going to sleep
+   14:52:11 INFO system woke up
+   14:52:11 INFO games were running during suspend; warning the user games=["World of Warcraft"]
+   14:52:20 INFO network is back after_ms=8632
+   ```
+   **Conclusão:** avisar só porque havia jogo aberto não basta. É preciso verificar se a conexão do jogo realmente morreu. Daí a checagem das conexões TCP do jogo em `/proc/<pid>/net/tcp`: estado, fila de envio e contador de retransmissões.
+
+### Em aberto
+
+- [ ] Suspensão longa com o WoW aberto: o jogo de fato perde a conexão? Em quanto tempo ele mesmo percebe? A checagem de retransmissões detecta isso?
+- [ ] Deixar o PC ocioso além do tempo de suspensão automática com o WoW aberto: confirmar que a tela apaga mas o PC não suspende.
