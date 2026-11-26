@@ -12,6 +12,10 @@ name = "snowctl"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1.0.105"
+clap = { version = "4.6.10", features = ["derive"] }
+snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
+snowlauncher-wine = { version = "0.1.0", path = "../snowlauncher-wine" }
 
 [lints]
 workspace = true
