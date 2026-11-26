@@ -161,6 +161,11 @@ A casinha é um **prefixo Wine controlado pelo Snow Launcher**. Ela inclui:
 - **Vigia**:
   - Escuta `PrepareForSleep` do logind. Ao acordar, aguarda a rede voltar (NetworkManager) e reinicia **Battle.net e Agent** de forma limpa.
   - **Nunca encerra um jogo em execução.** Se o WoW estiver aberto ao acordar, reinicia só Battle.net e Agent, ou avisa o usuário por notificação. O comportamento é configurável.
+  - **Sem suspensão automática com jogo aberto (padrão).** Enquanto um jogo estiver rodando, o `snowd` pede ao sistema para não suspender por inatividade (portal `org.freedesktop.portal.Inhibit`, só a flag *Suspend*). A tela ainda pode apagar, e a suspensão manual pelo menu continua funcionando.
+    - **Motivo:** durante a suspensão o servidor encerra a sessão do jogo. Ao acordar, o jogo fica com uma conexão TCP "meio aberta" e pode levar ~15 min para perceber (`tcp_retries2 = 15`). Não há como forçar a desconexão sem root nem sem mexer no jogo.
+    - **Opção do usuário:** `[sleep] allow_suspend_while_playing = true` no `config.toml` libera a suspensão automática mesmo com jogo aberto.
+  - **Aviso ao acordar com jogo aberto.** Se algum jogo estiver rodando quando o sistema acordar (suspensão manual, tampa do notebook ou a opção acima ligada), o Snow mostra uma notificação: o jogo perdeu a conexão e precisa ser fechado e aberto de novo.
+  - **Jogos são reconhecidos por uma lista fechada de executáveis** (que depois vem do repositório de quirks), nunca por "qualquer `.exe` desconhecido". Um falso positivo seguraria a suspensão sem motivo.
   - Detecta Battle.net travado (janela sem resposta, processo zumbi, loop do Agent) e oferece ou aplica a correção.
 - **Battle.net discreto**: o Snow Launcher abre os jogos com `Battle.net.exe --exec="launch <código>"`, e a janela do Battle.net fica escondida até ser necessária (ver "Inicialização e a janela do Battle.net").
   - **Atenção:** o GNOME não tem bandeja do sistema nativa. Use o portal **Background** (aparece em "Apps em segundo plano") e notificações, sem depender de AppIndicator.
@@ -496,7 +501,7 @@ Assisted-by: Claude (Anthropic)
 | Versão | Entrega |
 |---|---|
 | **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda |
-| **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, correção do erro do Agent, `snowctl status`, `snowctl doctor` |
+| **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso ao acordar, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` |
 | **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão |
 | **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar", tela de progresso de inicialização com o Snow animado, configurações, notificações, portal Background |
 | **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções |
