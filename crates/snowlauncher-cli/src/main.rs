@@ -87,6 +87,7 @@ fn render_status(prefix: &Path, processes: &[&ProcessInfo]) -> String {
             ProcessRole::Agent => "Agent",
             ProcessRole::WineService => "Wine",
             ProcessRole::Launcher => "launcher",
+            ProcessRole::Game => "game",
             ProcessRole::Other => "other",
         };
         let _ = writeln!(

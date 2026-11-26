@@ -37,6 +37,15 @@ impl ProcessInfo {
             None => &self.name,
         }
     }
+
+    /// Title of the game this process is, if it is a known game.
+    pub fn game_title(&self) -> Option<&'static str> {
+        if ProcessRole::of(self) == ProcessRole::Game {
+            known_game_title(self.display_name())
+        } else {
+            None
+        }
+    }
 }
 
 /// What a process is, as far as its command line tells.
@@ -55,7 +64,10 @@ pub enum ProcessRole {
     /// Linux-side launcher or runtime (umu-run, pressure-vessel, Lutris
     /// wrapper...). These inherit `WINEPREFIX` but are not Wine programs.
     Launcher,
-    /// Any other Windows program: usually a game.
+    /// A known game (see [`KNOWN_GAMES`]).
+    Game,
+    /// Any other Windows program. Not assumed to be a game: a false
+    /// positive would, for example, keep the computer from sleeping.
     Other,
 }
 
@@ -82,6 +94,37 @@ const WINE_SERVICE_NAMES: &[&str] = &[
     // Wine's accessibility bridge (Proton).
     "xalia.exe",
 ];
+
+/// Known game executables and their titles.
+///
+/// Only processes listed here count as games. Executable names are
+/// compared case-insensitively.
+// TODO(E5): confirm each name on a real install; WoW retail/Classic were
+// the priority.
+pub const KNOWN_GAMES: &[(&str, &str)] = &[
+    ("Wow.exe", "World of Warcraft"),
+    ("WowT.exe", "World of Warcraft (PTR)"),
+    ("WowB.exe", "World of Warcraft (Beta)"),
+    ("WowClassic.exe", "World of Warcraft Classic"),
+    ("WowClassicT.exe", "World of Warcraft Classic (PTR)"),
+    ("WowClassicB.exe", "World of Warcraft Classic (Beta)"),
+    ("Diablo IV.exe", "Diablo IV"),
+    ("Diablo III64.exe", "Diablo III"),
+    ("D2R.exe", "Diablo II: Resurrected"),
+    ("Overwatch.exe", "Overwatch 2"),
+    ("Hearthstone.exe", "Hearthstone"),
+    ("HeroesOfTheStorm_x64.exe", "Heroes of the Storm"),
+    ("SC2_x64.exe", "StarCraft II"),
+    ("StarCraft.exe", "StarCraft: Remastered"),
+    ("Warcraft III.exe", "Warcraft III: Reforged"),
+];
+
+fn known_game_title(exe: &str) -> Option<&'static str> {
+    KNOWN_GAMES
+        .iter()
+        .find(|(name, _)| exe.eq_ignore_ascii_case(name))
+        .map(|(_, title)| *title)
+}
 
 /// Chromium marks its child processes with `--type=gpu-process` etc.
 const CHROMIUM_CHILD_FLAG: &str = "--type=";
@@ -129,6 +172,8 @@ impl ProcessRole {
             Some(Self::Agent)
         } else if any(WINE_SERVICE_NAMES) {
             Some(Self::WineService)
+        } else if KNOWN_GAMES.iter().any(|(name, _)| matches(name)) {
+            Some(Self::Game)
         } else {
             None
         }
@@ -179,6 +224,17 @@ pub fn processes_in_prefix<'a>(
             .as_deref()
             .is_some_and(|wineprefix| wineprefix.is_absolute() && wineprefix == prefix)
     })
+}
+
+/// Titles of the known games running in `prefix`, sorted and without
+/// duplicates (a game may run as several processes).
+pub fn running_games(processes: &[ProcessInfo], prefix: &Path) -> Vec<&'static str> {
+    let mut titles: Vec<&'static str> = processes_in_prefix(processes, prefix)
+        .filter_map(ProcessInfo::game_title)
+        .collect();
+    titles.sort_unstable();
+    titles.dedup();
+    titles
 }
 
 #[cfg(test)]
@@ -303,11 +359,59 @@ mod tests {
     }
 
     #[test]
-    fn unknown_windows_program_is_other() {
+    fn known_games_are_recognized_with_title() {
+        let wow = ProcessInfo {
+            pid: Pid(1),
+            name: "Wow.exe".to_owned(),
+            cmdline: vec![r"G:\World of Warcraft\_retail_\Wow.exe".to_owned()],
+            wineprefix: None,
+        };
+        assert_eq!(ProcessRole::of(&wow), ProcessRole::Game);
+        assert_eq!(wow.game_title(), Some("World of Warcraft"));
         assert_eq!(
-            role(&[r"G:\World of Warcraft\_retail_\Wow.exe"]),
-            ProcessRole::Other
+            role(&[r"G:\World of Warcraft\_classic_\WOWCLASSIC.EXE"]),
+            ProcessRole::Game
         );
+    }
+
+    #[test]
+    fn running_games_only_counts_our_prefix_and_dedups() {
+        let game = |pid, exe: &str, prefix: &str| ProcessInfo {
+            pid: Pid(pid),
+            name: String::new(),
+            cmdline: vec![exe.to_owned()],
+            wineprefix: Some(PathBuf::from(prefix)),
+        };
+        let processes = [
+            game(1, r"G:\World of Warcraft\_retail_\Wow.exe", PREFIX),
+            game(2, r"G:\World of Warcraft\_retail_\Wow.exe", PREFIX),
+            game(
+                3,
+                r"C:\Games\Diablo IV\Diablo IV.exe",
+                "/home/user/Games/lutris",
+            ),
+            game(
+                4,
+                r"C:\Program Files (x86)\Battle.net\Battle.net.exe",
+                PREFIX,
+            ),
+        ];
+        assert_eq!(
+            running_games(&processes, Path::new(PREFIX)),
+            ["World of Warcraft"]
+        );
+    }
+
+    #[test]
+    fn unknown_windows_program_is_not_a_game() {
+        let tool = ProcessInfo {
+            pid: Pid(1),
+            name: "BlizzardError.e".to_owned(),
+            cmdline: vec![r"C:\Program Files (x86)\Battle.net\BlizzardError.exe".to_owned()],
+            wineprefix: None,
+        };
+        assert_eq!(ProcessRole::of(&tool), ProcessRole::Other);
+        assert_eq!(tool.game_title(), None);
     }
 
     #[test]
