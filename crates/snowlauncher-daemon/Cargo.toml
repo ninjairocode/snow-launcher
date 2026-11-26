@@ -15,9 +15,11 @@ path = "src/main.rs"
 anyhow = "1.0.105"
 clap = { version = "4.6.10", features = ["derive"] }
 directories = "6.0.0"
+fs4 = "1.1.0"
 futures-util = { version = "0.3.34", default-features = false }
 snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
 snowlauncher-wine = { version = "0.1.0", path = "../snowlauncher-wine" }
+thiserror = "2"
 tokio = { version = "1.54.1", features = ["rt", "macros", "signal", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
