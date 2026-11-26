@@ -3,12 +3,15 @@
 //! What it does today, for one Wine prefix:
 //! - blocks automatic suspend while a game is running (unless the user
 //!   allowed it in `config.toml`);
-//! - after resume, if a game was left running, waits for the network and
-//!   watches the game's connections; warns only if one of them died.
+//! - watches the games' connections while they run and warns when one
+//!   dies (e.g. after a suspend or a network outage: the game stays open
+//!   but no longer talks to the server);
+//! - after resume, logs how long the network took to come back.
 //!
 //! Restarting Battle.net comes later, once experiment E4 confirms the
 //! approach.
 
+mod connections;
 mod games;
 mod logind;
 mod networkmanager;
@@ -32,19 +35,16 @@ use tokio::signal::unix::{SignalKind, signal};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+use crate::connections::ConnectionMonitor;
 use crate::games::{GameGuard, watch_games};
 use crate::logind::LogindSleepMonitor;
 use crate::networkmanager::NmNetworkMonitor;
 use crate::notifications::DesktopNotifier;
 use crate::portal::PortalSuspendInhibitor;
-use crate::resume::{ResumeTimings, ResumeWatcher};
+use crate::resume::ResumeWatcher;
 
-/// Waits after resume (see [`ResumeTimings`]).
-const RESUME_TIMINGS: ResumeTimings = ResumeTimings {
-    network_timeout: Duration::from_secs(60),
-    check_window: Duration::from_secs(60),
-    check_interval: Duration::from_secs(5),
-};
+/// How long to wait for the network after resume before giving up.
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How often to check whether a game started or stopped.
 const GAME_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -101,24 +101,30 @@ async fn main() -> Result<()> {
         .await
         .context("failed to subscribe to logind sleep signals")?;
     let mut resume_watcher = ResumeWatcher {
-        system: ProcfsProcessTable::new(),
-        prefix: prefix.path().to_owned(),
-        notifier: DesktopNotifier::new(session_bus.clone()),
         network: NmNetworkMonitor::new(&system_bus)
             .await
             .context("failed to create the NetworkManager client")?,
-        timings: RESUME_TIMINGS,
+        network_timeout: NETWORK_TIMEOUT,
     };
 
     let game_table = ProcfsProcessTable::new();
-    let mut game_guard = GameGuard::new(PortalSuspendInhibitor::new(session_bus), config.sleep);
+    let mut game_guard = GameGuard::new(
+        PortalSuspendInhibitor::new(session_bus.clone()),
+        config.sleep,
+    );
+    let mut connections = ConnectionMonitor::new(
+        NmNetworkMonitor::new(&system_bus)
+            .await
+            .context("failed to create the NetworkManager client")?,
+        DesktopNotifier::new(session_bus),
+    );
 
     let mut sigterm = signal(SignalKind::terminate()).context("failed to listen for SIGTERM")?;
 
     info!("watching suspend, resume and games");
     tokio::select! {
         result = watch_sleep(&mut sleep_monitor, &mut resume_watcher) => result?,
-        result = watch_games(&game_table, prefix.path(), &mut game_guard, GAME_POLL_INTERVAL) => result?,
+        result = watch_games(&game_table, prefix.path(), &mut game_guard, &mut connections, GAME_POLL_INTERVAL) => result?,
         _ = tokio::signal::ctrl_c() => info!("interrupted, stopping"),
         _ = sigterm.recv() => info!("received SIGTERM, stopping"),
     }

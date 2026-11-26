@@ -1,15 +1,20 @@
-//! Watches for running games and blocks automatic suspend while they run.
+//! Watches for running games: blocks automatic suspend while they run and
+//! has their connections watched (see `connections.rs`).
 
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use snowlauncher_core::config::SleepConfig;
-use snowlauncher_core::desktop::SuspendInhibitor;
-use snowlauncher_core::process::{ProcessTable, running_games};
+use snowlauncher_core::desktop::{Notifier, SuspendInhibitor};
+use snowlauncher_core::network::NetworkMonitor;
+use snowlauncher_core::process::{Pid, ProcessTable, game_processes, game_titles};
 use snowlauncher_core::sleep::should_inhibit_suspend;
+use snowlauncher_core::tcp::SocketTable;
 use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
+
+use crate::connections::ConnectionMonitor;
 
 /// Keeps the inhibition in sync with the set of running games.
 pub struct GameGuard<I> {
@@ -79,21 +84,33 @@ impl<I: SuspendInhibitor> GameGuard<I> {
     }
 }
 
-/// Polls the processes of `prefix` every `every` and updates `guard`.
+/// Polls the processes of `prefix` every `every`, then updates the
+/// suspend inhibition and samples the games' connections.
 /// Only returns on a fatal error (e.g. `/proc` unreadable).
-pub async fn watch_games<T: ProcessTable, I: SuspendInhibitor>(
-    table: &T,
+pub async fn watch_games<T, I, N, M>(
+    system: &T,
     prefix: &Path,
     guard: &mut GameGuard<I>,
+    connections: &mut ConnectionMonitor<N, M>,
     every: Duration,
-) -> Result<()> {
+) -> Result<()>
+where
+    T: ProcessTable + SocketTable,
+    I: SuspendInhibitor,
+    N: NetworkMonitor,
+    M: Notifier,
+{
     let mut ticker = tokio::time::interval(every);
     // After a suspend, do not fire a burst of missed ticks.
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        let processes = table.processes().context("failed to list processes")?;
-        guard.update(running_games(&processes, prefix)).await;
+        let processes = ProcessTable::processes(system).context("failed to list processes")?;
+        let games = game_processes(&processes, prefix);
+        let pids: Vec<Pid> = games.iter().map(|game| game.pid).collect();
+        let titles = game_titles(games);
+        guard.update(titles.clone()).await;
+        connections.update(system, &pids, &titles).await;
     }
 }
 

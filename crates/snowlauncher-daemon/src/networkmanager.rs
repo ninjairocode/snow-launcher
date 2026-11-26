@@ -51,6 +51,10 @@ impl NetworkMonitor for NmNetworkMonitor {
             "NetworkManager state updates stopped".to_owned(),
         ))
     }
+
+    async fn is_online(&mut self) -> Result<bool, zbus::Error> {
+        Ok(is_online(self.proxy.state().await?))
+    }
 }
 
 fn is_online(state: u32) -> bool {

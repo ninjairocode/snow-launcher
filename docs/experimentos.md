@@ -75,7 +75,23 @@ Resultados dos experimentos da seção 13 do `project.md` e de outras observaç�
    ```
    **Conclusão:** avisar só porque havia jogo aberto não basta. É preciso verificar se a conexão do jogo realmente morreu. Daí a checagem das conexões TCP do jogo em `/proc/<pid>/net/tcp`: estado, fila de envio e contador de retransmissões.
 
+4. **Mesma suspensão curta (16 s), já com a checagem de conexões:** nenhum aviso, que é o correto.
+   ```
+   15:08:18 INFO network is back after_ms=12562
+   15:08:18 INFO checking whether the game connection survived games=["World of Warcraft"]
+   15:09:18 INFO game connection survived the suspend games=["World of Warcraft"]
+   ```
+5. **Cabo de rede removido e recolocado com o WoW aberto:** o jogo se reconectou sozinho. Uma conexão que retransmite porque a *rede local* caiu não está morta: ela se recupera se o servidor ainda mantém a sessão. **Conclusão:** as retransmissões só podem contar enquanto a rede estiver online.
+
+6. **Conexão meio aberta sem suspensão:** depois de uma queda de rede mais longa, a rede voltou (NetworkManager `State = 70`, conexões HTTPS normais), mas o WoW "não se comunicava com mais nada", embora o personagem ainda andasse. As duas conexões com a **porta 3724** (servidor de jogo; IPs 24.105.52.59 e 66.40.179.35) estavam com **10 retransmissões**, timer de retransmissão ligado e fila de envio crescendo (0x138 → 0x154 bytes em 5 s):
+   ```
+   rem=3B346918:0E8C st=01 tx:rx=00000138:00000000 tr:when=01:00000F2A retrnsmt=0000000A
+   rem=23B32842:0E8C st=01 tx:rx=0000013C:00000000 tr:when=01:00000F2A retrnsmt=0000000A
+   ```
+   **Conclusão:** o problema não é exclusivo da suspensão. Qualquer queda longa o bastante deixa o jogo assim. A vigilância das conexões passou a rodar durante toda a sessão de jogo, com limite de 6 retransmissões.
+
 ### Em aberto
 
+- [ ] Por quanto tempo o servidor do WoW mantém a sessão sem resposta? (Tirar o cabo e cronometrar até o jogo mostrar a desconexão, ou até ele voltar ao recolocar.)
 - [ ] Suspensão longa com o WoW aberto: o jogo de fato perde a conexão? Em quanto tempo ele mesmo percebe? A checagem de retransmissões detecta isso?
 - [ ] Deixar o PC ocioso além do tempo de suspensão automática com o WoW aberto: confirmar que a tela apaga mas o PC não suspende.

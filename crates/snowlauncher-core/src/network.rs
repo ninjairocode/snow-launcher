@@ -14,4 +14,7 @@ pub trait NetworkMonitor {
     /// Returns immediately if it already has. Never times out on its own:
     /// callers decide how long to wait.
     fn wait_online(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Whether the system has full connectivity right now.
+    fn is_online(&mut self) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }

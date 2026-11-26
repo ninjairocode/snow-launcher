@@ -1,13 +1,16 @@
-//! TCP connections of a process, and whether they died during a suspend.
+//! TCP connections of a process, and whether they died.
 //!
-//! While the computer sleeps, the game server may drop the session. After
-//! resume the game keeps a "half-open" connection: it sends data, gets no
-//! answer, and the kernel keeps retransmitting for ~15 minutes before
-//! giving up. That retransmission is visible, without root, in
+//! If the network is gone for long enough (a suspend, a pulled cable, a
+//! router restart), the game server drops the session. When the network
+//! comes back the game keeps a "half-open" connection: it sends data, gets
+//! no answer, and the kernel keeps retransmitting for ~15 minutes before
+//! giving up. Meanwhile the game looks alive (you can even walk around)
+//! but talks to nothing. That retransmission is visible, without root, in
 //! `/proc/<pid>/net/tcp`.
 
 use std::collections::HashSet;
 
+use crate::desktop::Notification;
 use crate::process::Pid;
 
 /// `TCP_ESTABLISHED` in `/proc/net/tcp`'s `st` column.
@@ -16,8 +19,10 @@ const STATE_ESTABLISHED: u8 = 0x01;
 const TIMER_RETRANSMIT: u8 = 1;
 /// Consecutive retransmissions of the same data with no answer from the
 /// server before a connection is considered dead. With exponential
-/// backoff, 4 retransmissions take several seconds of silence.
-pub const DEAD_AFTER_RETRANSMITS: u32 = 4;
+/// backoff, 6 retransmissions take roughly 20 to 30 seconds of silence,
+/// so a brief Wi-Fi hiccup does not count. A real half-open connection
+/// observed with WoW had reached 10.
+pub const DEAD_AFTER_RETRANSMITS: u32 = 6;
 
 /// One line of `/proc/<pid>/net/tcp` or `tcp6`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +107,37 @@ impl DeadConnectionDetector {
         self.previously_dead = dead;
         confirmed
     }
+
+    /// Forgets earlier samples. Used when the local network drops: while
+    /// it is down, retransmissions are expected and say nothing about the
+    /// server.
+    pub fn reset(&mut self) {
+        self.previously_dead.clear();
+    }
+}
+
+/// The warning shown when a game's connection died, or `None` if no
+/// game is given.
+// TODO(i18n): translate (pt-BR) once gettext is in place (v0.6).
+pub fn lost_connection_notice(game_titles: &[&str]) -> Option<Notification> {
+    let (summary, which) = match game_titles {
+        [] => return None,
+        [title] => (format!("{title} lost its connection"), "The game is"),
+        _ => (
+            format!("{} lost their connection", game_titles.join(", ")),
+            "The games are",
+        ),
+    };
+    let body = format!(
+        "The server stopped answering. {which} still open but no longer \
+         connected, and may take several minutes to notice. Close it and \
+         open it again."
+    );
+    Some(Notification {
+        summary,
+        body,
+        urgent: true,
+    })
 }
 
 #[cfg(test)]
@@ -187,5 +223,39 @@ mod tests {
         assert!(!detector.observe(&stuck));
         assert!(!detector.observe(&recovered)); // server answered
         assert!(!detector.observe(&stuck)); // needs two in a row again
+    }
+
+    #[test]
+    fn reset_forgets_previous_samples() {
+        let stuck = sockets(&[STUCK]);
+        let mut detector = DeadConnectionDetector::default();
+        assert!(!detector.observe(&stuck));
+        detector.reset();
+        assert!(!detector.observe(&stuck));
+        assert!(detector.observe(&stuck));
+    }
+
+    #[test]
+    fn no_notice_without_games() {
+        assert_eq!(lost_connection_notice(&[]), None);
+    }
+
+    #[test]
+    fn notice_names_the_game_and_is_urgent() {
+        let notice = lost_connection_notice(&["World of Warcraft"]).unwrap();
+        assert_eq!(notice.summary, "World of Warcraft lost its connection");
+        assert!(notice.body.contains("The game is still open"));
+        assert!(notice.body.contains("Close it"));
+        assert!(notice.urgent);
+    }
+
+    #[test]
+    fn notice_lists_several_games() {
+        let notice = lost_connection_notice(&["World of Warcraft", "Diablo IV"]).unwrap();
+        assert_eq!(
+            notice.summary,
+            "World of Warcraft, Diablo IV lost their connection"
+        );
+        assert!(notice.body.contains("The games are"));
     }
 }
