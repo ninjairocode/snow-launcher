@@ -37,6 +37,13 @@ Resultados dos experimentos da seção 13 do `project.md` e de outras observaç�
    ```
 2. Depois de acordar, o Battle.net e o Agent **continuaram com os mesmos PIDs** (97076 e 97140). O problema de "não reconectar" não é processo morto, é o processo vivo sem conexão. Por isso a detecção não pode depender só de "o processo existe".
 
+3. **Rede após acordar:** o NetworkManager voltou a `CONNECTED_GLOBAL` cerca de **5 s** depois do sinal de acordar (suspensão de 13 s, Wi-Fi/cabo sem troca de rede):
+   ```
+   14:06:59 INFO system woke up, waiting for the network
+   14:07:04 INFO network is back after_ms=5016
+   ```
+   O limite de 60 s do `snowd` deixa folga. Qualquer ação no Battle.net logo após acordar, antes desses ~5 s, encontraria a rede fora.
+
 ### Em aberto
 
 - [x] O Battle.net reconectou sozinho depois desta suspensão curta (cerca de 15 s)? **Sim, aparentemente.**
