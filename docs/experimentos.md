@@ -39,5 +39,6 @@ Resultados dos experimentos da seção 13 do `project.md` e de outras observaç�
 
 ### Em aberto
 
-- [ ] O Battle.net reconectou sozinho depois desta suspensão curta (cerca de 15 s)? E depois de uma longa (mais de 10 min), ou com troca de rede?
+- [x] O Battle.net reconectou sozinho depois desta suspensão curta (cerca de 15 s)? **Sim, aparentemente.**
+- [ ] E depois de uma suspensão longa (mais de 10 min), de uma hibernação ou de uma troca de rede (outro Wi-Fi)?
 - [ ] Reiniciar o Battle.net e o Agent depois de acordar resolve? E com o WoW aberto?

@@ -1,10 +1,15 @@
 //! `snowd`: Snow Launcher's background daemon.
 //!
-//! For now it only watches suspend/resume and logs it. Restarting
-//! Battle.net after resume comes next, once experiment E4 confirms the
-//! approach.
+//! For now it only watches suspend/resume, waits for the network after
+//! resume and logs it all. Restarting Battle.net comes later, once
+//! experiment E4 confirms the approach.
 
 mod logind;
+mod networkmanager;
+mod resume;
+
+use std::future::Future;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use snowlauncher_core::sleep::{SleepEvent, SleepMonitor};
@@ -13,6 +18,12 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::logind::LogindSleepMonitor;
+use crate::networkmanager::NmNetworkMonitor;
+use crate::resume::ResumeWatcher;
+
+/// How long to wait for the network after resume before giving up.
+// TODO(config): make this configurable in config.toml.
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -24,48 +35,63 @@ async fn main() -> Result<()> {
 
     info!(version = env!("CARGO_PKG_VERSION"), "snowd starting");
 
-    let mut monitor = LogindSleepMonitor::connect()
+    // One connection to the system bus, shared by logind and NetworkManager.
+    let system_bus = zbus::Connection::system()
+        .await
+        .context("failed to connect to the system D-Bus")?;
+    let mut monitor = LogindSleepMonitor::connect(&system_bus)
         .await
         .context("failed to subscribe to logind sleep signals")?;
+    let network = NmNetworkMonitor::new(&system_bus)
+        .await
+        .context("failed to create the NetworkManager client")?;
+    let mut handler = ResumeWatcher::new(network, NETWORK_TIMEOUT);
     let mut sigterm = signal(SignalKind::terminate()).context("failed to listen for SIGTERM")?;
 
     info!("watching suspend and resume");
     tokio::select! {
-        result = watch_sleep(&mut monitor, log_sleep_event) => result?,
+        result = watch_sleep(&mut monitor, &mut handler) => result?,
         _ = tokio::signal::ctrl_c() => info!("interrupted, stopping"),
         _ = sigterm.recv() => info!("received SIGTERM, stopping"),
     }
     Ok(())
 }
 
-/// Forwards every sleep event to `on_event` until the monitor ends.
-async fn watch_sleep<M: SleepMonitor>(
+/// Reacts to sleep events. Handling is sequential: the next event is only
+/// read after the previous one was handled (events are queued meanwhile,
+/// so none are lost).
+trait SleepHandler {
+    fn handle(&mut self, event: SleepEvent) -> impl Future<Output = ()> + Send;
+}
+
+/// Passes every sleep event to `handler` until the monitor ends.
+async fn watch_sleep<M: SleepMonitor, H: SleepHandler>(
     monitor: &mut M,
-    mut on_event: impl FnMut(SleepEvent),
+    handler: &mut H,
 ) -> Result<()> {
     while let Some(event) = monitor
         .next_event()
         .await
         .context("failed to read sleep event")?
     {
-        on_event(event);
+        handler.handle(event).await;
     }
     warn!("sleep event source closed; no longer watching suspend/resume");
     Ok(())
-}
-
-fn log_sleep_event(event: SleepEvent) {
-    match event {
-        SleepEvent::Suspending => info!("system is going to sleep"),
-        SleepEvent::Resumed => info!("system woke up"),
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::VecDeque;
-    use std::future::Future;
+
+    /// Records the events it receives.
+    impl SleepHandler for Vec<SleepEvent> {
+        fn handle(&mut self, event: SleepEvent) -> impl Future<Output = ()> + Send {
+            self.push(event);
+            std::future::ready(())
+        }
+    }
 
     /// Plays back a fixed list of results, then ends.
     struct ScriptedMonitor(VecDeque<Result<SleepEvent, std::io::Error>>);
@@ -87,9 +113,7 @@ mod tests {
             Ok(SleepEvent::Resumed),
         ]));
         let mut seen = Vec::new();
-        watch_sleep(&mut monitor, |event| seen.push(event))
-            .await
-            .unwrap();
+        watch_sleep(&mut monitor, &mut seen).await.unwrap();
         assert_eq!(seen, [SleepEvent::Suspending, SleepEvent::Resumed]);
     }
 
@@ -101,7 +125,7 @@ mod tests {
             Ok(SleepEvent::Resumed),
         ]));
         let mut seen = Vec::new();
-        let result = watch_sleep(&mut monitor, |event| seen.push(event)).await;
+        let result = watch_sleep(&mut monitor, &mut seen).await;
         assert!(result.is_err());
         assert_eq!(seen, [SleepEvent::Suspending]);
     }

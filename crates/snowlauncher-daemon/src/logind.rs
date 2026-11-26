@@ -25,10 +25,9 @@ pub struct LogindSleepMonitor {
 }
 
 impl LogindSleepMonitor {
-    /// Connects to the system bus and subscribes to the signal.
-    pub async fn connect() -> zbus::Result<Self> {
-        let connection = zbus::Connection::system().await?;
-        let manager = ManagerProxy::new(&connection).await?;
+    /// Subscribes to the signal on an existing system bus connection.
+    pub async fn connect(system_bus: &zbus::Connection) -> zbus::Result<Self> {
+        let manager = ManagerProxy::new(system_bus).await?;
         let signals = manager.receive_prepare_for_sleep().await?;
         Ok(Self { signals })
     }
