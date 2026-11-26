@@ -1,5 +1,6 @@
 //! [`ProcessTable`] implementation that reads Linux `/proc`.
 
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::io;
@@ -7,11 +8,19 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use snowlauncher_core::process::{Pid, ProcessInfo, ProcessTable};
+use snowlauncher_core::tcp::{SocketTable, TcpSocket, parse_proc_net_tcp};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProcfsError {
     #[error("failed to list processes in {path}")]
     ReadDir {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("failed to read {path}")]
+    Read {
         path: PathBuf,
         #[source]
         source: io::Error,
@@ -64,6 +73,60 @@ impl ProcessTable for ProcfsProcessTable {
         processes.sort_by_key(|process| process.pid);
         Ok(processes)
     }
+}
+
+impl SocketTable for ProcfsProcessTable {
+    type Error = ProcfsError;
+
+    /// Matches the socket inodes in `/proc/<pid>/fd` against the process's
+    /// own view of `net/tcp` and `net/tcp6` (its network namespace).
+    fn tcp_sockets(&self, pid: Pid) -> Result<Option<Vec<TcpSocket>>, ProcfsError> {
+        let dir = self.root.join(pid.0.to_string());
+        let fd_dir = dir.join("fd");
+        let entries = match fs::read_dir(&fd_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => {
+                return Err(ProcfsError::Read {
+                    path: fd_dir,
+                    source,
+                });
+            }
+        };
+        // File descriptors may close while we look; skip those.
+        let inodes: HashSet<u64> = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| fs::read_link(entry.path()).ok())
+            .filter_map(|target| socket_inode(&target))
+            .collect();
+
+        let mut sockets = Vec::new();
+        for table in ["tcp", "tcp6"] {
+            let path = dir.join("net").join(table);
+            match fs::read_to_string(&path) {
+                Ok(text) => sockets.extend(
+                    parse_proc_net_tcp(&text)
+                        .into_iter()
+                        .filter(|socket| inodes.contains(&socket.inode)),
+                ),
+                // tcp6 is missing when IPv6 is disabled; both vanish if the
+                // process just exited.
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(source) => return Err(ProcfsError::Read { path, source }),
+            }
+        }
+        Ok(Some(sockets))
+    }
+}
+
+/// `socket:[12345]` (an `fd` symlink target) → `12345`.
+fn socket_inode(target: &Path) -> Option<u64> {
+    target
+        .to_str()?
+        .strip_prefix("socket:[")?
+        .strip_suffix(']')?
+        .parse()
+        .ok()
 }
 
 /// Reads one `/proc/<pid>` directory. Returns `None` if the process is gone.
@@ -136,6 +199,13 @@ mod tests {
             ]
         );
         assert!(parse_cmdline(b"").is_empty());
+    }
+
+    #[test]
+    fn socket_inode_from_fd_link() {
+        assert_eq!(socket_inode(Path::new("socket:[774411]")), Some(774411));
+        assert_eq!(socket_inode(Path::new("pipe:[774411]")), None);
+        assert_eq!(socket_inode(Path::new("/dev/null")), None);
     }
 
     #[test]

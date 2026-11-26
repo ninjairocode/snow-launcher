@@ -68,3 +68,49 @@ fn real_proc_contains_this_test() {
     let me = std::process::id();
     assert!(processes.iter().any(|p| p.pid.0 == me));
 }
+
+#[test]
+fn finds_only_the_processes_own_tcp_sockets() {
+    use snowlauncher_core::tcp::SocketTable;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let proc_root = tmp.path().join("proc");
+    let dir = proc_root.join("4242");
+    fs::create_dir_all(dir.join("fd")).unwrap();
+    fs::create_dir_all(dir.join("net")).unwrap();
+    // fd links: one TCP socket of ours, a pipe, a regular file.
+    symlink("socket:[1001]", dir.join("fd/10")).unwrap();
+    symlink("pipe:[2002]", dir.join("fd/11")).unwrap();
+    symlink("/dev/null", dir.join("fd/12")).unwrap();
+    let header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n";
+    fs::write(
+        dir.join("net/tcp"),
+        format!(
+            "{header}\
+   0: 0F02000A:C5A2 52861022:045F 01 00000000:00000000 00:00000000 00000000  1000        0 1001 1 0 20 4 30 10 -1\n\
+   1: 0F02000A:C5A3 52861022:045F 01 00000000:00000000 00:00000000 00000000  1000        0 9999 1 0 20 4 30 10 -1\n"
+        ),
+    )
+    .unwrap();
+    // No tcp6 file: IPv6 disabled must not be an error.
+
+    let table = ProcfsProcessTable::with_root(&proc_root);
+    let sockets = table.tcp_sockets(Pid(4242)).unwrap().unwrap();
+    let inodes: Vec<u64> = sockets.iter().map(|s| s.inode).collect();
+    assert_eq!(inodes, [1001]);
+
+    // A process that is gone gives None, not an error.
+    assert!(table.tcp_sockets(Pid(1)).unwrap().is_none());
+}
+
+#[test]
+fn real_proc_lists_tcp_sockets_of_this_process() {
+    use snowlauncher_core::tcp::SocketTable;
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let table = ProcfsProcessTable::new();
+    let sockets = table.tcp_sockets(Pid(std::process::id())).unwrap().unwrap();
+    // 0x0A = TCP_LISTEN
+    assert!(sockets.iter().any(|s| s.state == 0x0A));
+    drop(listener);
+}

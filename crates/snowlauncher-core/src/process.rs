@@ -229,7 +229,20 @@ pub fn processes_in_prefix<'a>(
 /// Titles of the known games running in `prefix`, sorted and without
 /// duplicates (a game may run as several processes).
 pub fn running_games(processes: &[ProcessInfo], prefix: &Path) -> Vec<&'static str> {
-    let mut titles: Vec<&'static str> = processes_in_prefix(processes, prefix)
+    game_titles(game_processes(processes, prefix))
+}
+
+/// The processes of known games running in `prefix`.
+pub fn game_processes<'a>(processes: &'a [ProcessInfo], prefix: &'a Path) -> Vec<&'a ProcessInfo> {
+    processes_in_prefix(processes, prefix)
+        .filter(|process| process.game_title().is_some())
+        .collect()
+}
+
+/// Titles of the given game processes, sorted and without duplicates.
+pub fn game_titles<'a>(games: impl IntoIterator<Item = &'a ProcessInfo>) -> Vec<&'static str> {
+    let mut titles: Vec<&'static str> = games
+        .into_iter()
         .filter_map(ProcessInfo::game_title)
         .collect();
     titles.sort_unstable();

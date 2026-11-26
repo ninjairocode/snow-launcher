@@ -3,8 +3,8 @@
 //! What it does today, for one Wine prefix:
 //! - blocks automatic suspend while a game is running (unless the user
 //!   allowed it in `config.toml`);
-//! - after resume, warns if a game was left running (its connection to the
-//!   server did not survive), then waits for the network.
+//! - after resume, if a game was left running, waits for the network and
+//!   watches the game's connections; warns only if one of them died.
 //!
 //! Restarting Battle.net comes later, once experiment E4 confirms the
 //! approach.
@@ -37,10 +37,14 @@ use crate::logind::LogindSleepMonitor;
 use crate::networkmanager::NmNetworkMonitor;
 use crate::notifications::DesktopNotifier;
 use crate::portal::PortalSuspendInhibitor;
-use crate::resume::ResumeWatcher;
+use crate::resume::{ResumeTimings, ResumeWatcher};
 
-/// How long to wait for the network after resume before giving up.
-const NETWORK_TIMEOUT: Duration = Duration::from_secs(60);
+/// Waits after resume (see [`ResumeTimings`]).
+const RESUME_TIMINGS: ResumeTimings = ResumeTimings {
+    network_timeout: Duration::from_secs(60),
+    check_window: Duration::from_secs(60),
+    check_interval: Duration::from_secs(5),
+};
 
 /// How often to check whether a game started or stopped.
 const GAME_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -97,13 +101,13 @@ async fn main() -> Result<()> {
         .await
         .context("failed to subscribe to logind sleep signals")?;
     let mut resume_watcher = ResumeWatcher {
-        processes: ProcfsProcessTable::new(),
+        system: ProcfsProcessTable::new(),
         prefix: prefix.path().to_owned(),
         notifier: DesktopNotifier::new(session_bus.clone()),
         network: NmNetworkMonitor::new(&system_bus)
             .await
             .context("failed to create the NetworkManager client")?,
-        network_timeout: NETWORK_TIMEOUT,
+        timings: RESUME_TIMINGS,
     };
 
     let game_table = ProcfsProcessTable::new();
