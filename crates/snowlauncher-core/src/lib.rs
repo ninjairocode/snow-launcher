@@ -4,3 +4,4 @@
 //! world is expressed as a trait here and implemented in another crate.
 
 pub mod process;
+pub mod sleep;
