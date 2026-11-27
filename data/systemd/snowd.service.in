@@ -1,0 +1,21 @@
+# Installed by `snowctl service install`; removed by `snowctl service uninstall`.
+# @SNOWD@ is replaced with the path of the snowd binary.
+
+[Unit]
+Description=Snow Launcher daemon
+Documentation=https://github.com/ninjairocode/snow-launcher
+# snowd needs the desktop session: portal, notifications, session D-Bus.
+PartOf=graphical-session.target
+After=graphical-session.target
+# Give up after 3 failed starts within 10 minutes (project.md, section 9.2).
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=@SNOWD@
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

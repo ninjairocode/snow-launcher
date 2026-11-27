@@ -13,7 +13,6 @@
 
 mod connections;
 mod games;
-mod instance;
 mod logind;
 mod networkmanager;
 mod notifications;
@@ -21,6 +20,7 @@ mod portal;
 mod resume;
 
 use std::future::Future;
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -29,6 +29,7 @@ use clap::Parser;
 use snowlauncher_core::config::Config;
 use snowlauncher_core::sleep::{SleepEvent, SleepMonitor};
 use snowlauncher_wine::config_file::{choose_prefix, default_config_path, read_config};
+use snowlauncher_wine::instance::{self, default_lock_path};
 use snowlauncher_wine::prefix::WinePrefix;
 use snowlauncher_wine::procfs::ProcfsProcessTable;
 use tokio::signal::unix::{SignalKind, signal};
@@ -37,7 +38,6 @@ use tracing_subscriber::EnvFilter;
 
 use crate::connections::ConnectionMonitor;
 use crate::games::{GameGuard, watch_games};
-use crate::instance::default_lock_path;
 use crate::logind::LogindSleepMonitor;
 use crate::networkmanager::NmNetworkMonitor;
 use crate::notifications::DesktopNotifier;
@@ -70,6 +70,9 @@ async fn main() -> Result<()> {
     // to the journal.
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        // Colors only in a terminal; the journal would store the raw
+        // escape codes.
+        .with_ansi(io::stderr().is_terminal())
         .init();
 
     info!(version = env!("CARGO_PKG_VERSION"), "snowd starting");

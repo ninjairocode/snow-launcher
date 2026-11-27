@@ -82,6 +82,37 @@ pub fn acquire(path: &Path) -> Result<InstanceLock, InstanceError> {
     Ok(InstanceLock { _file: file })
 }
 
+/// A `snowd` currently holding the lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunningInstance {
+    /// Read from the lock file; `None` if it could not be read.
+    pub pid: Option<u32>,
+}
+
+/// Whether some `snowd` holds the lock at `path` right now. Read-only:
+/// never creates the file nor keeps the lock.
+pub fn running_instance(path: &Path) -> Result<Option<RunningInstance>, InstanceError> {
+    let io_error = |source| InstanceError::Io {
+        path: path.to_owned(),
+        source,
+    };
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        // No file: no daemon has ever run in this session.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(io_error(source)),
+    };
+    // Same reason as in `acquire` for calling through the trait.
+    match fs4::FileExt::try_lock_shared(&file) {
+        // Nobody holds it; dropping `file` releases our shared lock.
+        Ok(()) => Ok(None),
+        Err(fs4::TryLockError::WouldBlock) => Ok(Some(RunningInstance {
+            pid: read_pid(&mut file),
+        })),
+        Err(fs4::TryLockError::Error(source)) => Err(io_error(source)),
+    }
+}
+
 fn read_pid(file: &mut File) -> Option<u32> {
     let mut text = String::new();
     file.read_to_string(&mut text).ok()?;
@@ -131,6 +162,32 @@ mod tests {
         let _lock = acquire(&path).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content.trim(), std::process::id().to_string());
+    }
+
+    #[test]
+    fn running_instance_is_reported_without_taking_the_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(LOCK_FILE_NAME);
+
+        assert_eq!(running_instance(&path).unwrap(), None);
+        assert!(!path.exists(), "a check must not create the file");
+
+        let lock = acquire(&path).unwrap();
+        assert_eq!(
+            running_instance(&path).unwrap(),
+            Some(RunningInstance {
+                pid: Some(std::process::id())
+            })
+        );
+        // Checking did not take the lock away from the holder...
+        assert!(matches!(
+            acquire(&path),
+            Err(InstanceError::AlreadyRunning { .. })
+        ));
+        drop(lock);
+        // ...nor keep it once the holder is gone.
+        assert_eq!(running_instance(&path).unwrap(), None);
+        assert!(acquire(&path).is_ok());
     }
 
     #[test]
