@@ -10,6 +10,7 @@ pub mod desktop;
 pub mod display;
 pub mod errors;
 pub mod house;
+pub mod install;
 pub mod network;
 pub mod process;
 pub mod registry;

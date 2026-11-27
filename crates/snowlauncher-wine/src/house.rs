@@ -16,8 +16,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use directories::BaseDirs;
 use snowlauncher_core::house::{
-    DPI_REGISTRY_FILES, DPI_REGISTRY_KEYS, HOUSE_RECORD_SCHEMA, HouseInputs, HouseRecord,
-    HouseStep, RemoveStep, WINDOWS_PRODUCT_FILE, WINDOWS_PRODUCT_NAME, WINDOWS_VERSION,
+    DPI_REGISTRY_FILES, DPI_REGISTRY_KEYS, HOUSE_ENV, HOUSE_RECORD_SCHEMA, HouseInputs,
+    HouseRecord, HouseStep, RemoveStep, WINDOWS_PRODUCT_FILE, WINDOWS_PRODUCT_NAME,
+    WINDOWS_VERSION,
 };
 use snowlauncher_core::registry;
 
@@ -39,8 +40,9 @@ pub struct UmuRunner {
     pub log: PathBuf,
 }
 
-impl WineRunner for UmuRunner {
-    fn run(&mut self, args: &[String]) -> io::Result<bool> {
+impl UmuRunner {
+    /// `umu-run <args>` in the house, output appended to the log.
+    fn command(&self, args: &[impl AsRef<std::ffi::OsStr>]) -> io::Result<Command> {
         if let Some(dir) = self.log.parent() {
             fs::create_dir_all(dir)?;
         }
@@ -48,17 +50,47 @@ impl WineRunner for UmuRunner {
             .create(true)
             .append(true)
             .open(&self.log)?;
-        let status = Command::new(&self.umu_run)
+        let mut command = Command::new(&self.umu_run);
+        command
             .args(args)
             .env("WINEPREFIX", &self.prefix)
             .env("GAMEID", "umu-default")
             .env("PROTONPATH", &self.runtime)
+            .envs(HOUSE_ENV.iter().copied())
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
-            .stderr(log)
-            .status()?;
-        Ok(status.success())
+            .stderr(log);
+        Ok(command)
     }
+
+    /// Starts a program in the house without waiting for it. Proton only
+    /// returns once everything in the prefix has exited, which for an
+    /// installer that opens Battle.net means "when Battle.net closes".
+    pub fn spawn(&self, args: &[impl AsRef<std::ffi::OsStr>]) -> io::Result<std::process::Child> {
+        self.command(args)?.spawn()
+    }
+}
+
+impl WineRunner for UmuRunner {
+    fn run(&mut self, args: &[String]) -> io::Result<bool> {
+        Ok(self.command(args)?.status()?.success())
+    }
+}
+
+/// Total size of the files under `path`, without following symlinks.
+/// Unreadable entries are skipped: this is for progress, not accounting.
+pub fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_dir() => dir_size(&entry.path()),
+            Ok(kind) if kind.is_file() => entry.metadata().map_or(0, |meta| meta.len()),
+            _ => 0,
+        })
+        .sum()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -558,6 +590,41 @@ mod tests {
             Err(HouseError::Refused { .. })
         ));
         assert!(outside.exists());
+    }
+
+    #[test]
+    fn everything_in_the_house_runs_with_qt_high_dpi_scaling_off() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runner = UmuRunner {
+            umu_run: PathBuf::from("/usr/bin/umu-run"),
+            prefix: PathBuf::from("/pfx"),
+            runtime: PathBuf::from("/runtime"),
+            log: tmp.path().join("log"),
+        };
+        let command = runner.command(&["Battle.net-Setup.exe"]).unwrap();
+        let envs: Vec<(String, String)> = command
+            .get_envs()
+            .filter_map(|(key, value)| {
+                Some((key.to_str()?.to_owned(), value?.to_str()?.to_owned()))
+            })
+            .collect();
+        // Without it the installer freezes above 100% DPI (E11).
+        assert!(envs.contains(&("QT_ENABLE_HIGHDPI_SCALING".to_owned(), "0".to_owned())));
+        assert!(envs.contains(&("WINEPREFIX".to_owned(), "/pfx".to_owned())));
+    }
+
+    #[test]
+    fn dir_size_counts_files_and_skips_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("Battle.net");
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("a"), [0u8; 100]).unwrap();
+        fs::write(dir.join("sub/b"), [0u8; 50]).unwrap();
+        // A link to something big must not be counted (nor followed).
+        fs::write(tmp.path().join("big"), [0u8; 10_000]).unwrap();
+        symlink(tmp.path().join("big"), dir.join("link")).unwrap();
+        assert_eq!(dir_size(&dir), 150);
+        assert_eq!(dir_size(&tmp.path().join("missing")), 0);
     }
 
     #[test]
