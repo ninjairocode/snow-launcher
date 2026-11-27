@@ -18,7 +18,7 @@ directories = "6.0.0"
 futures-util = { version = "0.3.34", default-features = false }
 snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
 snowlauncher-wine = { version = "0.1.0", path = "../snowlauncher-wine" }
-tokio = { version = "1.54.1", features = ["rt", "macros", "signal", "time", "sync"] }
+tokio = { version = "1.54.1", features = ["rt", "macros", "signal", "time", "sync", "process"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 zbus = { version = "5.13.2", default-features = false, features = ["tokio"] }

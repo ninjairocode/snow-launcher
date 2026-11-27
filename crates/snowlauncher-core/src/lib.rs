@@ -17,3 +17,4 @@ pub mod process;
 pub mod registry;
 pub mod sleep;
 pub mod tcp;
+pub mod tray;
