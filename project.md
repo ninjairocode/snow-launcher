@@ -397,14 +397,42 @@ A tela principal da casinha tem:
 - **Ícones dos jogos tirados da instalação do próprio usuário.** O `Wow.exe` e o `Battle.net.exe` trazem o próprio ícone embutido, em até 256×256 (conferido). O Snow lê esse ícone do executável **na máquina do usuário**, guarda uma cópia em `~/.cache/snow-launcher/icons/` e mostra nos cards dos jogos, na barra de status e nas notificações (por exemplo, o aviso de conexão perdida com o ícone do jogo). É o mesmo que um gerenciador de arquivos faz ao mostrar o ícone de um `.exe`: nada é distribuído pelo Snow. Sem ícone legível, usar um quadrado com a inicial no estilo do Snow.
 - No libadwaita: `GtkFlowBox` de cards numa página simples. O Bottles é uma boa referência visual.
 
-### Ícone do Battle.net na bandeja
+### Bandeja: só o Snow
 
-O ícone que o Battle.net põe na bandeja do sistema fica **pequeno e borrado**: o Wine repassa à bandeja do desktop (no GNOME, pela extensão AppIndicator) o ícone pequeno do programa (16 ou 32 px), e a bandeja amplia. O Snow **não altera arquivos do Battle.net**, então a saída é substituir o ícone da bandeja, não o do Battle.net:
+O ícone que o Battle.net põe na bandeja fica **pequeno e borrado**: o Wine repassa à bandeja do desktop (no GNOME, pela extensão AppIndicator) o ícone pequeno do programa (16 ou 32 px), e a bandeja amplia. Em vez de tentar consertar isso, a bandeja passa a ter **um item só, o do Snow**, e o Battle.net sai de lá. O Snow é o ponto de entrada para o Battle.net e para os jogos.
 
-- **Item próprio do Snow na bandeja** (StatusNotifierItem pelo D-Bus; nativo no KDE, e no GNOME com a extensão AppIndicator), com um ícone nítido e um menu: abrir o Battle.net, os jogos e sair.
-- **Qual ícone**, por opção: `tray_icon = "battlenet"` (o ícone de 256 px tirado do `Battle.net.exe` do usuário, nítido) ou `"snow"` (o ícone do Snow).
-- **Esconder o ícone borrado do Battle.net** no Wine, para não haver dois. Validar no **E9**: como esconder (configuração do Battle.net ou do Wine) e, principalmente, se "abrir o Battle.net" pelo menu do Snow traz de volta a janela quando o Battle.net está só na bandeja. Sem isso, o usuário perderia o acesso ao Battle.net.
-- Sem a extensão AppIndicator no GNOME, não há bandeja; aí vale o portal Background e as notificações (seção 5).
+- **Ícone:** a versão **simbólica** (monocromática) do ícone do Snow, no estilo dos outros ícones da barra do GNOME. A casinha colorida perde a forma em 16–22 px. Por isso o ícone simbólico sobe da v0.6 para a **v0.3**.
+- **Menu:**
+
+  | Item | O que faz |
+  |---|---|
+  | *Linha de estado* (não clicável) | Ex.: "World of Warcraft rodando · suspensão bloqueada", lido do D-Bus do `snowd` |
+  | Abrir Battle.net | Traz a janela do Battle.net, ou abre se estiver fechado |
+  | Jogar ▸ | Um item por jogo instalado, com o ícone dele, abrindo direto (`--exec="launch …"`) |
+  | Abrir Snow Launcher | A janela principal |
+  | Diagnóstico | O mesmo do `snowctl doctor`, em janela |
+  | Sair do Battle.net | Fecha o Battle.net e o Agent de forma limpa, **nunca** um jogo aberto |
+
+- **Esconder o item do Battle.net:** a condição de segurança foi **validada** no E9 (O8): com o Battle.net na bandeja, rodar o `Battle.net.exe` de novo traz a janela de volta. Falta descobrir **como** esconder o ícone dele (configuração do Battle.net ou do Wine).
+- **Quem mostra o item** (a decidir na v0.3): o `snowd`, que já roda sempre como serviço e mostraria o item desde o login, ou a GUI rodando em segundo plano.
+- Sem bandeja (GNOME sem a extensão AppIndicator), valem o portal Background e as notificações.
+- Usa StatusNotifierItem pelo D-Bus: nativo no KDE, e no GNOME com a extensão AppIndicator.
+
+### Controle do Battle.net
+
+A bandeja, a tela de progresso, a reconexão ao acordar e a correção do Agent dependem de o Snow **controlar o Battle.net de forma confiável**. Tudo isso só pelos meios que um usuário teria: o executável e os parâmetros dele, ferramentas do próprio Wine, processos e logs. **Nunca** pelos protocolos da Blizzard (seção 2) e nunca olhando a janela (o Wayland não deixa; seção 5).
+
+| Capacidade | Como | Estado |
+|---|---|---|
+| Abrir | `umu-run Battle.net.exe` no prefixo, com o ambiente da casinha | **Validado** (E6, O6) |
+| Saber que está rodando | Processos do prefixo por `WINEPREFIX` e linha de comando | **Validado** (O1) |
+| Saber em que etapa está (iniciando, aguardando login, pronto, travado) | Marcas nos logs do cliente: `Logging started` → `AgentManager is now initialized` → `Login triggered` → `State changed to: Ready` / `Logged into Battle.net successfully`. "Aguardando login" = não chegou ao `Ready` em N s | **Validado** (E10, O8) |
+| Trazer a janela de volta (inclusive da bandeja) | Rodar o `Battle.net.exe` de novo com ele já aberto: a instância existente se mostra, sem abrir outra | **Validado** (E9, O8) |
+| Abrir um jogo direto | `Battle.net.exe --exec="launch <código do produto>"`. O código é o do produto (`WoWF`), **não** o *uid* do Agent (`wowf`, que é ignorado em silêncio); o log liga os dois (`productCode=WoWF_wowf`) | **Validado** (E5, O8) |
+| Fechar de forma limpa | `taskkill /im Battle.net.exe` sem `/f`: fecha de verdade em ~1 s (diferente do "X", que só esconde na bandeja), e o Agent sai sozinho em ~10 s. `wineserver -k` e sinais ficam só como plano B (seção 9.2) | **Validado** (E10, O8) |
+| Nunca fechar um jogo aberto | Checar os jogos do prefixo antes de qualquer encerramento (já existe no `snowd`) | **Base pronta** |
+
+Cada capacidade vira uma operação do `snowd` exposta no D-Bus (hoje a interface só tem propriedades de leitura), com `--dry-run` no `snowctl`, e só entra em uso automático depois de validada.
 
 ### Identidade visual e paleta
 
@@ -428,7 +456,7 @@ O ícone que o Battle.net põe na bandeja do sistema fica **pequeno e borrado**:
 
 **Arquivos:** ícone em `data/icons/`; ilustrações em `data/illustrations/`, geradas por `data/illustrations/generate.py` a partir das peças compartilhadas (a casinha e o Snow espiando, tirados do ícone, e o Snow de corpo inteiro). Ao mudar uma peça, rodar o gerador para manter tudo coerente.
 
-**Pendências:** a versão simbólica monocromática do ícone, para a barra do GNOME (v0.6). Em 16 px o ícone colorido fica só com a forma da casinha, o que é esperado nesse tamanho.
+**Pendências:** a versão simbólica monocromática do ícone, para a barra do GNOME e a bandeja (v0.3). Em 16 px o ícone colorido fica só com a forma da casinha, o que é esperado nesse tamanho.
 
 **Paleta da marca (tirada do ícone):**
 
@@ -612,7 +640,7 @@ Assisted-by: Claude (Anthropic)
 | **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda | Parcial: E4 em parte, mais as observações O1–O4 |
 | **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso de conexão perdida, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` | **Quase pronta** (ver 12.1) |
 | **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão (Windows 11, **escala automática**), opções globais de **MangoHud e GameMode** | Não começou; o E6 validou o caminho (O6) |
-| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar" e os **ícones dos jogos tirados dos executáveis**, tela de progresso de inicialização com o Snow e as luzinhas, configurações, notificações, portal Background, **item próprio na bandeja** substituindo o ícone borrado do Battle.net (E9) | Não começou; identidade visual desenhada |
+| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar" e os **ícones dos jogos tirados dos executáveis**, tela de progresso de inicialização com o Snow e as luzinhas, configurações, notificações, portal Background, **bandeja só com o Snow** (ícone simbólico; esconder o do Battle.net depende do E9), controle do Battle.net validado (E5, E9, E10) | Não começou; identidade visual desenhada |
 | **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções | Não começou |
 | **v0.5** | Gamescope por jogo, MangoHud por jogo, perfis isolados por jogo, escolha do Proton (pastas da Steam/ProtonPlus) com backup do prefixo | Não começou |
 | **v0.6** | Exportar diagnóstico, internacionalização (pt-BR e en), ícone simbólico, polimento | Não começou |
@@ -649,11 +677,12 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 | E2 | GE-Proton recente com NTSYNC ativo | Melhora a resposta geral? `/dev/ntsync` está acessível no Fedora 45? | **Acessível e já em uso** pelo GE-Proton11-14, sem configuração (O5). Falta medir o ganho |
 | E3 | Letra de unidade em vez de link simbólico + versão do Windows | A loja do WoW volta a funcionar? Qual combinação? | **Forte indício: Windows 11** faz a loja abrir; a letra de unidade não foi o fator (O6). Falta o teste inverso |
 | E4 | Script que escuta `PrepareForSleep` e reinicia o Battle.net | Resolve a reconexão? Reiniciar o Battle.net com o WoW aberto causa algum problema? | Em parte: o sinal chega e o Battle.net reconecta sozinho depois de suspensões curtas (O2). Falta suspensão longa e reiniciar com o WoW aberto |
-| E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | Pendente |
+| E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | **Metade validada** (O8): `--exec="launch WoWF"` abre o jogo (código do produto, não o *uid*). Falta: o jogo herda o ambiente? gamescope por jogo? |
 | E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? | **Respondido** (O6): o instalador não trava (~78 s); o "Localizar jogo" reaproveitou os 49 GB; o jogo roda em `G:`; a loja abre com Windows 11. Testado com `G:` apontando para a pasta existente, sem mover |
 | E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? | Pendente |
 | E8 | DPI do Wine igual ao `Xft.dpi` do desktop (192 com GNOME a 125%) contra 144 e 96 | O Battle.net e o instalador ficam do mesmo tamanho que os outros aplicativos? Qual é o melhor padrão automático? | **Validado no GNOME 125%** (O7): `Xft.dpi` (192) ficou ideal. Faltam outras escalas, KDE, X11 e vários monitores |
-| E9 | Esconder o ícone do Battle.net na bandeja (Wine/Battle.net) e reabrir a janela por fora (rodar o `Battle.net.exe` de novo com ele já aberto) | Dá para esconder? A janela volta quando o Battle.net está só na bandeja? | Pendente |
+| E9 | Esconder o ícone do Battle.net na bandeja (Wine/Battle.net) e reabrir a janela por fora (rodar o `Battle.net.exe` de novo com ele já aberto) | Dá para esconder? A janela volta quando o Battle.net está só na bandeja? | **Janela volta: validado** (O8). Falta descobrir como esconder o ícone |
+| E10 | Fechar o Battle.net por fora (`taskkill` sem `/f`, depois `wineserver -k`) e mapear nos logs as etapas da inicialização | Fecha de verdade ou só vai para a bandeja? O Agent sai junto? Quais linhas de log marcam "aguardando login" e "pronto"? | **Validado** (O8): fecha de verdade, o Agent sai em ~10 s, marcas mapeadas |
 
 ## 14 – Riscos
 
