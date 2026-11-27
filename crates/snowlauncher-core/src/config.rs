@@ -15,12 +15,23 @@
 //!
 //! [sleep]
 //! allow_suspend_while_playing = false
+//!
+//! [display]
+//! ui_scale = "auto"   # or a percentage: 100, 125, 150...
+//!
+//! [house]
+//! # Where games live; seen as G: inside Snow Launcher's prefix.
+//! library = "~/Games/SnowLauncher"
+//! # Proton to use. Defaults to the newest GE-Proton found.
+//! # runtime = "~/.local/share/Steam/compatibilitytools.d/GE-Proton11-14-x86_64"
 //! ```
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+
+use crate::display::UiScale;
 
 /// Schema version this build understands.
 pub const CURRENT_SCHEMA: u32 = 1;
@@ -32,6 +43,8 @@ pub struct Config {
     /// Wine prefix to watch, as written in the file (see [`expand_home`]).
     pub prefix: Option<PathBuf>,
     pub sleep: SleepConfig,
+    pub display: DisplayConfig,
+    pub house: HouseConfig,
 }
 
 impl Default for Config {
@@ -40,6 +53,8 @@ impl Default for Config {
             schema: CURRENT_SCHEMA,
             prefix: None,
             sleep: SleepConfig::default(),
+            display: DisplayConfig::default(),
+            house: HouseConfig::default(),
         }
     }
 }
@@ -52,6 +67,24 @@ pub struct SleepConfig {
     /// Off by default: a game left running through a suspend loses its
     /// connection to the server and can take ~15 minutes to notice.
     pub allow_suspend_while_playing: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct DisplayConfig {
+    /// UI scale of the Battle.net app and installer (see `display`).
+    pub ui_scale: UiScale,
+}
+
+/// Snow Launcher's own Battle.net environment (the "house").
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct HouseConfig {
+    /// Game library, mapped as G: in the prefix. Absolute or `~/...`.
+    /// Defaults to `~/Games/SnowLauncher`.
+    pub library: Option<PathBuf>,
+    /// Proton runtime folder. Defaults to the newest GE-Proton found.
+    pub runtime: Option<PathBuf>,
 }
 
 /// Replaces a leading `~` component with `home`: `~/Games` becomes
@@ -184,5 +217,23 @@ mod tests {
         // Not supported: kept as is (and later rejected as relative).
         assert_eq!(expand("~other/Games"), Path::new("~other/Games"));
         assert_eq!(expand("Games/battlenet"), Path::new("Games/battlenet"));
+    }
+
+    #[test]
+    fn reads_display_and_house() {
+        let loaded =
+            parse("[display]\nui_scale = 150\n[house]\nlibrary = \"~/Games/Snow\"\n").unwrap();
+        assert_eq!(loaded.config.display.ui_scale, UiScale::Percent(150));
+        assert_eq!(
+            loaded.config.house.library,
+            Some(PathBuf::from("~/Games/Snow"))
+        );
+        assert_eq!(loaded.config.house.runtime, None);
+        assert!(loaded.warnings.is_empty());
+    }
+
+    #[test]
+    fn invalid_ui_scale_is_an_error() {
+        assert!(parse("[display]\nui_scale = \"huge\"\n").is_err());
     }
 }
