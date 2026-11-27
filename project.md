@@ -548,7 +548,7 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 | # | Experimento | Pergunta | Estado |
 |---|---|---|---|
 | E1 | Desligar a aceleração por hardware do Battle.net | A interface melhora de forma perceptível? | Pendente |
-| E2 | GE-Proton recente com NTSYNC ativo | Melhora a resposta geral? `/dev/ntsync` está acessível no Fedora 45? | Pendente |
+| E2 | GE-Proton recente com NTSYNC ativo | Melhora a resposta geral? `/dev/ntsync` está acessível no Fedora 45? | **Acessível e já em uso** pelo GE-Proton11-14, sem configuração (O5). Falta medir o ganho |
 | E3 | Letra de unidade em vez de link simbólico + versão do Windows | A loja do WoW volta a funcionar? Qual combinação? | Pendente |
 | E4 | Script que escuta `PrepareForSleep` e reinicia o Battle.net | Resolve a reconexão? Reiniciar o Battle.net com o WoW aberto causa algum problema? | Em parte: o sinal chega e o Battle.net reconecta sozinho depois de suspensões curtas (O2). Falta suspensão longa e reiniciar com o WoW aberto |
 | E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | Pendente |

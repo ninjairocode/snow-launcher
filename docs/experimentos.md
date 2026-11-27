@@ -129,3 +129,21 @@ Resultados dos experimentos da seção 13 do `project.md` e de outras observaç�
 Sob o Wine, o cliente acha que o Agent não respondeu a tempo enquanto ele ainda está subindo, registra o erro e se recupera sozinho. O erro só importa junto com um sintoma (mensagem visível; instalar, atualizar ou jogar não funciona). O `doctor` passou a marcá-lo como **"usually harmless"**, e a correção automática da seção 8 só deve agir com sintoma, nunca só porque o código está no log.
 
 Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicação no catálogo.
+
+## O5 – NTSYNC, unidades e ajustes do prefixo atual (E1, E2, E3)
+
+**Data:** 2026-11-27
+**Ambiente:** o mesmo do O1 (kernel 7.3.6, Lutris + umu + GE-Proton11-14), com o Battle.net aberto.
+**Como:** só leitura: `/dev/ntsync`, `lsmod`, `/proc/<wineserver>/fd` e `environ`, `dosdevices/`, `user.reg`, `Battle.net.config`.
+
+### Resultados
+
+1. **E2 (NTSYNC): funciona e já está em uso.** `/dev/ntsync` existe com permissão `crw-rw-rw-`, o módulo `ntsync` está carregado e o `wineserver` do Battle.net tinha **2184 descritores abertos em `/dev/ntsync`**. Isso sem nenhuma configuração: o GE-Proton11-14 usa o NTSYNC sozinho quando o dispositivo está acessível, mesmo com `WINEESYNC=1` e `WINEFSYNC=1` no ambiente (passados pelo Lutris).
+   - **Para o Snow:** conferir o NTSYNC de verdade é olhar o `/proc/<wineserver>/fd`, não as variáveis de ambiente. Isso pode virar um item da barra de status e do `doctor`.
+2. **E3 (unidade / versão do Windows):** o prefixo do Lutris **não tem `G:`**: as unidades são `c:`, `s:` (`/home`), `v:` (`/run/media`), `x:` (home do usuário) e `z:` (`/`). O WoW está **dentro** do prefixo, em `drive_c/Program Files (x86)/World of Warcraft` (49 GB). Não há versão do Windows forçada para o Battle.net; as entradas de `AppDefaults` no `user.reg` são padrões do Proton para outros jogos.
+3. **E1 (aceleração por hardware):** o `Battle.net.config` não tem a opção, então ela está no padrão (ligada). Ainda falta comparar ligada e desligada.
+
+### Em aberto
+
+- [ ] E1: desligar "aceleração por hardware do navegador" nas configurações do Battle.net e comparar a fluidez da interface.
+- [ ] E3: a loja dentro do WoW funciona hoje, com o jogo em `C:` e sem `G:`?
