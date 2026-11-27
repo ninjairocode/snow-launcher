@@ -3,6 +3,7 @@
 //! For now it calls the libraries directly. Once `snowd` exposes its D-Bus
 //! interface, commands that depend on daemon state will go through it.
 
+mod daemon;
 mod doctor;
 mod service;
 
@@ -261,11 +262,14 @@ fn status(prefix: Option<PathBuf>, config: &Config) -> Result<()> {
         .context("failed to list processes")?;
     let ours: Vec<&ProcessInfo> = processes_in_prefix(&processes, prefix.path()).collect();
 
+    let mut text = render_status(prefix.path(), &ours);
+    text.push_str(&daemon::render(&daemon::query(), prefix.path()));
+
     // `println!` would panic on a closed pipe (`snowctl status | head`);
     // writing explicitly turns that into a normal error.
     io::stdout()
         .lock()
-        .write_all(render_status(prefix.path(), &ours).as_bytes())
+        .write_all(text.as_bytes())
         .context("failed to write to stdout")
 }
 

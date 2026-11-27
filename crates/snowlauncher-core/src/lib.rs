@@ -5,6 +5,7 @@
 
 pub mod battlenet_log;
 pub mod config;
+pub mod dbus;
 pub mod desktop;
 pub mod errors;
 pub mod network;

@@ -12,6 +12,7 @@
 //! approach.
 
 mod connections;
+mod dbus;
 mod games;
 mod logind;
 mod networkmanager;
@@ -122,15 +123,23 @@ async fn main() -> Result<()> {
         NmNetworkMonitor::new(&system_bus)
             .await
             .context("failed to create the NetworkManager client")?,
-        DesktopNotifier::new(session_bus),
+        DesktopNotifier::new(session_bus.clone()),
     );
+
+    // D-Bus interface on the session bus, fed by the game watch.
+    let (status_tx, status_rx) = tokio::sync::watch::channel(dbus::Status {
+        prefix: prefix.path().display().to_string(),
+        ..dbus::Status::default()
+    });
+    dbus::serve(&session_bus, status_rx.borrow().clone()).await?;
 
     let mut sigterm = signal(SignalKind::terminate()).context("failed to listen for SIGTERM")?;
 
     info!("watching suspend, resume and games");
     tokio::select! {
         result = watch_sleep(&mut sleep_monitor, &mut resume_watcher) => result?,
-        result = watch_games(&game_table, prefix.path(), &mut game_guard, &mut connections, GAME_POLL_INTERVAL) => result?,
+        result = watch_games(&game_table, prefix.path(), &mut game_guard, &mut connections, &status_tx, GAME_POLL_INTERVAL) => result?,
+        result = dbus::publish(&session_bus, status_rx) => result?,
         _ = tokio::signal::ctrl_c() => info!("interrupted, stopping"),
         _ = sigterm.recv() => info!("received SIGTERM, stopping"),
     }
