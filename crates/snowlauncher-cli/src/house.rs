@@ -1,20 +1,29 @@
-//! `snowctl house create`: Snow Launcher's own Battle.net prefix.
+//! `snowctl house create|remove`: Snow Launcher's own Battle.net prefix.
 //!
-//! For now only `--dry-run` exists: it resolves everything and shows the
-//! plan, changing nothing. Carrying it out comes in a later version.
+//! Both first resolve everything and show the plan; `--dry-run` stops
+//! there. Creating is verified step by step and undone if a step fails;
+//! removing never deletes games (see `snowlauncher_wine::house`).
 
 use std::fmt::Write as _;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use directories::BaseDirs;
 use snowlauncher_core::config::{Config, expand_home};
 use snowlauncher_core::display::{DpiChoice, choose_dpi};
+use snowlauncher_core::house::plan_removal;
 use snowlauncher_core::house::{
     Existing, HouseInputs, HouseStep, LIBRARY_DRIVE, WINDOWS_VERSION, plan_house,
 };
+use snowlauncher_core::process::{ProcessTable, processes_in_prefix};
 use snowlauncher_wine::desktop::desktop_dpi;
-use snowlauncher_wine::prefix::default_prefix_path;
+use snowlauncher_wine::house::{
+    self as executor, UmuRunner, create_log_path, load_record, record_path, save_record,
+};
+use snowlauncher_wine::prefix::{default_prefix_path, prefixes_root};
+use snowlauncher_wine::procfs::ProcfsProcessTable;
 use snowlauncher_wine::runtime::{Runtime, find_runtimes, find_umu_run, runtime_dirs};
 
 /// Default game library, under the user's home.
@@ -35,13 +44,7 @@ pub struct Summary {
     pub library_exists: bool,
 }
 
-pub fn create(options: CreateOptions, config: &Config) -> Result<String> {
-    if !options.dry_run {
-        bail!(
-            "Snow Launcher cannot create the house yet (v0.2 in progress). \
-             Use --dry-run to see what it would do."
-        );
-    }
+pub fn create(options: CreateOptions, config: &Config, out: &mut impl io::Write) -> Result<()> {
     let home = BaseDirs::new()
         .context("could not determine the home directory")?
         .home_dir()
@@ -83,7 +86,113 @@ pub fn create(options: CreateOptions, config: &Config) -> Result<String> {
         umu_run: find_umu_run(),
         library_exists: existing.library,
     };
-    Ok(render(&summary, &steps))
+    out.write_all(render(&summary, &steps, options.dry_run).as_bytes())?;
+    if options.dry_run {
+        return Ok(());
+    }
+
+    let root = prefixes_root().context("could not determine the data directory")?;
+    let record_file = record_path().context("could not determine the state directory")?;
+    let umu_run = check_can_create(
+        &summary.inputs.prefix,
+        &root,
+        summary.umu_run.clone(),
+        load_record(&record_file)?.is_some(),
+        &record_file,
+    )?;
+    let log = create_log_path().context("could not determine the state directory")?;
+    let mut runner = UmuRunner {
+        umu_run,
+        prefix: summary.inputs.prefix.clone(),
+        runtime: summary.runtime_path.clone(),
+        log: log.clone(),
+    };
+
+    writeln!(out, "\nCreating (Wine tools log: {}):", log.display())?;
+    let record = executor::create(
+        &steps,
+        &summary.inputs,
+        &summary.runtime_path,
+        &root,
+        &mut runner,
+        |step| {
+            // Best effort: progress output must not stop the work.
+            let _ = writeln!(out, "  - {step}");
+            let _ = out.flush();
+        },
+    )
+    .context("the house was not created; everything this run created was removed")?;
+    save_record(&record_file, &record)?;
+    writeln!(
+        out,
+        "\nDone. The house is ready; its record is in {}.\n\
+         Undo it with `snowctl house remove`.",
+        record_file.display()
+    )?;
+    Ok(())
+}
+
+/// Guards before changing anything. Returns the umu-run to use.
+fn check_can_create(
+    prefix: &Path,
+    prefixes_root: &Path,
+    umu_run: Option<PathBuf>,
+    house_recorded: bool,
+    record_file: &Path,
+) -> Result<PathBuf> {
+    ensure!(
+        !house_recorded,
+        "a house already exists (record in {}); remove it first with `snowctl house remove`",
+        record_file.display()
+    );
+    ensure!(
+        prefix.starts_with(prefixes_root) && prefix != prefixes_root,
+        "Snow Launcher only creates prefixes inside {} (got {})",
+        prefixes_root.display(),
+        prefix.display()
+    );
+    umu_run.context("umu-run not found: install umu-launcher (or Lutris, which bundles it)")
+}
+
+pub fn remove(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    let record_file = record_path().context("could not determine the state directory")?;
+    let Some(record) = load_record(&record_file)? else {
+        writeln!(out, "No house recorded; nothing to remove.")?;
+        return Ok(());
+    };
+    let processes = ProcfsProcessTable::new()
+        .processes()
+        .context("failed to list processes")?;
+    let prefix = fs::canonicalize(&record.prefix).unwrap_or_else(|_| record.prefix.clone());
+    let running = processes_in_prefix(&processes, &prefix).next().is_some();
+    let library_empty = match fs::read_dir(&record.library) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("could not read {}", record.library.display()));
+        }
+    };
+    let steps = plan_removal(&record, running, library_empty)?;
+
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "Removing Snow Launcher's Battle.net house{mode}:")?;
+    if dry_run {
+        for step in &steps {
+            writeln!(out, "  - would {step}")?;
+        }
+        return Ok(());
+    }
+    let root = prefixes_root().context("could not determine the data directory")?;
+    executor::remove(&steps, &root, &record_file, |step| {
+        let _ = writeln!(out, "  - {step}");
+    })?;
+    writeln!(out, "Done.")?;
+    Ok(())
 }
 
 /// Expands `~/` and requires an absolute path.
@@ -122,14 +231,16 @@ fn pick_runtime(configured: Option<PathBuf>, home: &Path) -> Result<Runtime> {
     )
 }
 
-pub fn render(summary: &Summary, steps: &[HouseStep]) -> String {
+pub fn render(summary: &Summary, steps: &[HouseStep], dry_run: bool) -> String {
     let inputs = &summary.inputs;
     let mut out = String::new();
     // Writing to a String cannot fail, so the results are ignored.
-    let _ = writeln!(
-        out,
-        "Plan for Snow Launcher's Battle.net house (dry run: nothing is changed)\n"
-    );
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    let _ = writeln!(out, "Plan for Snow Launcher's Battle.net house{mode}\n");
     let _ = writeln!(out, "Prefix:    {} (new)", inputs.prefix.display());
     let _ = writeln!(
         out,
@@ -164,10 +275,12 @@ pub fn render(summary: &Summary, steps: &[HouseStep]) -> String {
     for (number, step) in steps.iter().enumerate() {
         let _ = writeln!(out, "  {}. {step}", number + 1);
     }
-    let _ = writeln!(
-        out,
-        "\nNext, not part of this command yet: install Battle.net and locate the games."
-    );
+    if dry_run {
+        let _ = writeln!(
+            out,
+            "\nAfter the house: install Battle.net and locate the games (not yet automated)."
+        );
+    }
     out
 }
 
@@ -208,7 +321,7 @@ mod tests {
     #[test]
     fn shows_inputs_and_numbered_steps() {
         let (summary, steps) = summary(true);
-        let out = render(&summary, &steps);
+        let out = render(&summary, &steps, true);
         assert!(out.contains("dry run: nothing is changed"));
         assert!(out.contains("UI scale:  200% (192 DPI, from the desktop)"));
         assert!(
@@ -221,19 +334,31 @@ mod tests {
     #[test]
     fn flags_a_missing_umu_run() {
         let (summary, steps) = summary(false);
-        assert!(render(&summary, &steps).contains("umu-run:   NOT FOUND"));
+        assert!(render(&summary, &steps, false).contains("umu-run:   NOT FOUND"));
     }
 
     #[test]
-    fn refuses_to_run_without_dry_run() {
-        let options = CreateOptions {
-            dry_run: false,
-            prefix: None,
-            library: None,
-            runtime: None,
-        };
-        let error = create(options, &Config::default()).unwrap_err();
-        assert!(error.to_string().contains("--dry-run"));
+    fn guards_before_changing_anything() {
+        let root = Path::new("/home/u/.local/share/snow-launcher/prefixes");
+        let record = Path::new("/home/u/.local/state/snow-launcher/house.toml");
+        let umu = Some(PathBuf::from("/usr/bin/umu-run"));
+        let inside = root.join("battlenet");
+
+        assert!(check_can_create(&inside, root, umu.clone(), false, record).is_ok());
+        let only_one = check_can_create(&inside, root, umu.clone(), true, record).unwrap_err();
+        assert!(only_one.to_string().contains("already exists"));
+        let outside = check_can_create(
+            Path::new("/home/u/Games/battlenet"),
+            root,
+            umu.clone(),
+            false,
+            record,
+        )
+        .unwrap_err();
+        assert!(outside.to_string().contains("only creates prefixes inside"));
+        assert!(check_can_create(root, root, umu, false, record).is_err());
+        let no_umu = check_can_create(&inside, root, None, false, record).unwrap_err();
+        assert!(no_umu.to_string().contains("umu-run not found"));
     }
 
     #[test]

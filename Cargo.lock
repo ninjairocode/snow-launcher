@@ -713,6 +713,7 @@ dependencies = [
  "snowlauncher-core",
  "tempfile",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

@@ -12,5 +12,6 @@ pub mod errors;
 pub mod house;
 pub mod network;
 pub mod process;
+pub mod registry;
 pub mod sleep;
 pub mod tcp;

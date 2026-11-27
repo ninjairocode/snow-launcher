@@ -12,6 +12,7 @@ directories = "6.0.0"
 fs4 = "1.1.0"
 snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
 thiserror = "2"
+toml = "1.2.3"
 
 [lints]
 workspace = true
