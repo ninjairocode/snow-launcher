@@ -281,16 +281,58 @@ O app Battle.net e os dados do outro launcher **não são importados**: a casinh
 
 ### Escala da interface (DPI)
 
-O Wine desenha tudo a **96 DPI**, sem acompanhar a escala do desktop. Num monitor 1440p com escala de 125%, o instalador e o Battle.net ficam pequenos demais (O6). Ninguém deveria precisar ajustar isso à mão.
+O Wine desenha tudo a **96 DPI**, sem acompanhar a escala do desktop. Num monitor 1440p com escala de 125%, o instalador e o Battle.net ficam pequenos demais. **Ninguém deveria precisar ajustar isso à mão.**
 
-- **Padrão automático:** usar o DPI que o próprio desktop informa às aplicações X (`Xft.dpi`, que o GNOME e o KDE ajustam para a escala escolhida). Se não houver, usar 96 × a escala do monitor principal. Arredondar para os degraus do Windows (96, 120, 144, 168, 192...). Validar no E8.
-- **Aplicado ao criar a casinha, antes de rodar o instalador**, para o próprio instalador já vir legível. Gravado no registro do prefixo (`LogPixels`), com backup e reversível, como as outras ações.
-- **Opção do usuário** no `config.toml`, para quem prefere maior ou menor:
-  ```toml
-  [display]
-  ui_scale = "auto"   # ou uma porcentagem: 100, 125, 150, 200...
-  ```
-- Se a escala do desktop mudar (outro monitor), o `doctor` aponta a diferença e oferece reaplicar.
+**Validado no E8 (O7):** com o GNOME a 125% no Wayland, o desktop informa `Xft.dpi = 192` às aplicações X, e o Wine com **192 DPI ficou do tamanho certo**. A ideia central do plano: o Snow não calcula a escala sozinho, ele **pergunta ao desktop**, que já sabe como os aplicativos X são desenhados naquela tela.
+
+#### Como o DPI é escolhido (função pura no `core`, com testes de tabela)
+
+1. **Opção do usuário**, se houver (`ui_scale` em porcentagem): DPI = 96 × porcentagem.
+2. Senão, o **`Xft.dpi`** que o desktop publica para o X. O GNOME e o KDE ajustam esse valor conforme a escala e o modo de desenho dos aplicativos X.
+3. Senão, **96 × a escala do monitor principal**, se for possível descobrir.
+4. Senão, **96**.
+
+O resultado é **limitado a 96–288** (100% a 300%) e **arredondado para múltiplos de 24** (degraus de 25%), que é o que o Windows usa e evita texto borrado. O cálculo fica registrado no log, com a fonte usada (opção, `Xft.dpi`, monitor ou padrão).
+
+#### Casos que o plano precisa cobrir
+
+| Ambiente | O que o desktop informa | Esperado |
+|---|---|---|
+| GNOME Wayland, escala fracionária (125%, 150%) | `Xft.dpi` = 192 (desenha em 2× e reduz) | 192 (**validado a 125%**) |
+| GNOME Wayland, 100% ou 200% | `Xft.dpi` = 96 ou 192 | igual ao `Xft.dpi` |
+| KDE Wayland, "aplicativos X escalam sozinhos" | `Xft.dpi` = 96 × escala | igual ao `Xft.dpi` |
+| KDE Wayland, "o sistema escala os aplicativos X" | `Xft.dpi` = 96; o compositor amplia (fica borrado) | 96. Ampliar também no Wine dobraria o tamanho |
+| Sessão X11 (sem Wayland) | `Xft.dpi` das configurações do desktop | igual ao `Xft.dpi` |
+| Sem `Xft.dpi` publicado | — | 96 × escala do monitor, ou 96 |
+| Vários monitores com escalas diferentes | Um `Xft.dpi` só, global | Limitação do Wine: **um DPI por prefixo**. Usar o do desktop e permitir ajuste manual |
+| Driver Wayland nativo do Wine (futuro, fora do padrão do Proton) | O próprio Wine trata a escala | Não aplicar DPI extra; revisar quando o Proton adotar |
+
+Cada linha vira um caso de teste da função pura. As linhas não validadas na prática entram no E8 como "a confirmar com usuários" (pedir relatos com o `doctor`).
+
+#### Quando aplicar
+
+- **Na criação da casinha, antes de rodar o instalador**, para o instalador já vir legível.
+- **A cada inicialização da casinha, antes de abrir o Battle.net:** se estiver em `auto` e o DPI calculado mudou (outro monitor, outra escala), reaplicar. É só um valor no registro, gravado com o Battle.net fechado (o Wine só lê o DPI ao iniciar). Com uma porcentagem fixa escolhida pelo usuário, nunca mexer.
+- O valor aplicado fica no estado do Snow, para comparar depois. O `doctor` mostra o DPI aplicado, a fonte usada e uma eventual diferença.
+
+#### Como aplicar
+
+- As **três chaves `LogPixels`** que o Lutris também usa: `HKCU\Control Panel\Desktop`, `HKCU\Software\Wine\Fonts` e `HKLM\System\CurrentControlSet\Hardware Profiles\Current\Software\Fonts`.
+- Por uma ação declarativa de quirk (`set_registry`), com backup, registro no histórico e reversível, como todas as ações da seção 7.
+
+#### Opção do usuário
+
+```toml
+[display]
+ui_scale = "auto"   # ou uma porcentagem: 100, 125, 150, 200...
+```
+
+Na GUI (v0.3): "Escala da interface: Automática (200%)", com as opções de porcentagem e um aviso de que o Battle.net precisa reabrir para aplicar.
+
+#### A verificar ainda
+
+- Se o DPI muda algo **dentro dos jogos** (a interface do WoW tem escala própria; a 144 no Lutris não houve problema).
+- Os casos da tabela não validados, com relatos de usuários.
 
 ### MangoHud e GameMode
 
@@ -356,9 +398,25 @@ A tela principal da casinha tem:
 
 ### Identidade visual e paleta
 
-O ícone é o Snow de corpo inteiro, como mascote (traço suave, cores chapadas, sem fundo): boxer branco sentado num montinho de neve, mancha caramelo no olho esquerdo, piscadinha no olho direito, sorriso torto com dentinho, chapéu de mago azul com lua dourada e um cajado com um floco de neve azul na ponta. Arquivo: `data/icons/io.github.ninjairocode.SnowLauncher.svg`.
+**A metáfora central é a casinha de cachorro.** O Snow Launcher cuida da "casinha" onde o Battle.net mora (seção 5), e a identidade visual mostra isso literalmente: o Snow e a casinha dele. A casinha fica nas ilustrações, **não no formato da janela**: a janela principal continua retangular e nativa do libadwaita, para se comportar bem no GNOME (maximizar, encaixar, sombra, acessibilidade).
 
-**Pendência:** em tamanhos muito pequenos (32 px ou menos) o corpo inteiro perde detalhes. Avaliar uma versão só com a cabeça para esses tamanhos.
+**Ícone do app (novo, a desenhar):** a **cabeça do Snow saindo pela porta da casinha**, com chapéu de mago azul e lua dourada, a mancha caramelo no olho esquerdo e a piscadinha no olho direito. Telhado azul-noite com neve, madeira em tons de caramelo. É uma silhueta simples, legível em 32 px ou menos, o que **resolve a pendência** do ícone de corpo inteiro perder detalhe em tamanhos pequenos. Arquivo: `data/icons/io.github.ninjairocode.SnowLauncher.svg`.
+
+**Snow de corpo inteiro (o ícone atual vira ilustração):** boxer branco sentado num montinho de neve, mancha caramelo no olho esquerdo, piscadinha no olho direito, sorriso torto com dentinho, chapéu de mago azul com lua dourada e cajado com um floco de neve azul na ponta. Traço suave, cores chapadas, sem fundo. Usado nas telas grandes, abaixo.
+
+**Onde a casinha aparece:**
+
+| Lugar | Ilustração |
+|---|---|
+| Tela de progresso (inicialização, seção 5) | O Snow caminha até a casinha e **uma janelinha acende por etapa**: "Preparando o ambiente…", "O Battle.net está iniciando…", "Pronto". Floquinhos caindo |
+| Tela vazia (nenhum jogo) | A casinha com a porta aberta e ninguém dentro: "Nenhum jogo ainda" |
+| Tela de erro | A casinha com a luz apagada e o Snow do lado de fora, com o diagnóstico e a correção sugerida |
+| "Sobre" | O Snow inteiro, de mago, sentado na frente da casinha, com a dedicatória |
+| README e site | Ícone no topo; o Snow e a casinha como ilustração principal |
+
+**Depois (ideia, não compromisso):** uma janelinha de abertura recortada em formato de casinha enquanto o Battle.net inicia. Só quando houver GUI para testar as limitações do Wayland com janelas especiais.
+
+**Pendências:** desenhar o ícone novo (cabeça na porta) e a versão simbólica monocromática para a barra do GNOME (v0.6).
 
 **Paleta da marca (tirada do ícone):**
 
@@ -376,7 +434,7 @@ O ícone é o Snow de corpo inteiro, como mascote (traço suave, cores chapadas,
 - **A interface do dia a dia é nativa do libadwaita**: botões, listas e fundos seguem o tema do sistema e a **cor de destaque escolhida pelo usuário**. Não forçar o azul da marca nos controles.
 - **Status usam as cores semânticas do libadwaita** (sucesso, aviso, erro), nunca as da marca.
 - **A paleta da marca aparece onde está a personalidade do app**: tela de progresso com o Snow animado, telas vazias, "Sobre", ícones próprios dos jogos, README e site.
-- **Caramelo com moderação**: um ponto de destaque por tela, por exemplo o selo "Recomendada" na lista de versões do Proton.
+- **Caramelo com moderação**: um ponto de destaque por tela, por exemplo o selo "Recomendada" na lista de versões do Proton. Nas ilustrações, o caramelo fica na **madeira da casinha** e na mancha do Snow, não espalhado pela interface.
 - **No `metainfo.xml`**, declarar as cores de marca para as lojas de apps: `#DCE8FA` (tema claro) e `#203A63` (tema escuro).
 - Todas as ilustrações devem funcionar em tema claro e escuro (o contorno escuro garante isso).
 
@@ -582,7 +640,7 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 | E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | Pendente |
 | E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? | **Respondido** (O6): o instalador não trava (~78 s); o "Localizar jogo" reaproveitou os 49 GB; o jogo roda em `G:`; a loja abre com Windows 11. Testado com `G:` apontando para a pasta existente, sem mover |
 | E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? | Pendente |
-| E8 | DPI do Wine igual ao `Xft.dpi` do desktop (192 com GNOME a 125%) contra 144 e 96 | O Battle.net e o instalador ficam do mesmo tamanho que os outros aplicativos? Qual é o melhor padrão automático? | Pendente |
+| E8 | DPI do Wine igual ao `Xft.dpi` do desktop (192 com GNOME a 125%) contra 144 e 96 | O Battle.net e o instalador ficam do mesmo tamanho que os outros aplicativos? Qual é o melhor padrão automático? | **Validado no GNOME 125%** (O7): `Xft.dpi` (192) ficou ideal. Faltam outras escalas, KDE, X11 e vários monitores |
 
 ## 14 – Riscos
 

@@ -183,3 +183,20 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 
 - [ ] Confirmar a versão do Windows com o teste inverso (win10 → a loja falha de novo?).
 - [ ] E8: comparar DPI 144 e 192 no Battle.net e no instalador.
+
+## O7 – E8: DPI do Wine igual ao do desktop
+
+**Data:** 2026-11-27
+**Ambiente:** o mesmo do O6 (monitor 2560×1440, GNOME Wayland com escala 125%, `Xft.dpi = 192`), no prefixo de teste.
+**Como:** as três chaves `LogPixels` que o Lutris usa (`HKCU\Control Panel\Desktop`, `HKCU\Software\Wine\Fonts` e `HKLM\System\CurrentControlSet\Hardware Profiles\Current\Software\Fonts`) gravadas com **192** (`0xc0`) por um `.reg` importado com `regedit /S`, com backup antes. Depois, o Battle.net foi aberto.
+
+### Resultado
+
+- Com **192**, o Battle.net ficou **perfeito** para o mantenedor: legível e do tamanho certo. Antes, usava 144 no Lutris e 96 no padrão do prefixo novo.
+- Confirma a ideia de usar o `Xft.dpi` do desktop como padrão automático.
+
+### Em aberto
+
+- [ ] O instalador com 192.
+- [ ] Se o DPI afeta algo dentro do WoW.
+- [ ] Outras escalas e ambientes (GNOME 100%/150%/200%, KDE nos dois modos, sessão X11, vários monitores): pedir relatos de usuários.
