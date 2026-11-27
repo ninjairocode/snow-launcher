@@ -46,8 +46,7 @@ const LIGHTS_SVG: [&[u8]; 4] = [
 struct App {
     rows: Vec<StatusRow>,
     house: House,
-    empty: Option<gtk::gdk::Texture>,
-    lights: Vec<Option<gtk::gdk::Texture>>,
+    art: Illustrations,
     battlenet: BattlenetView,
     cards: Vec<GameCard>,
     games: FactoryVecDeque<GameRow>,
@@ -58,8 +57,8 @@ struct App {
 impl App {
     fn illustration(&self) -> Option<&gtk::gdk::Texture> {
         match self.text().0 {
-            Illustration::Empty => self.empty.as_ref(),
-            Illustration::Lights(on) => self.lights.get(on)?.as_ref(),
+            Illustration::Empty => self.art.empty.as_ref(),
+            Illustration::Lights(on) => self.art.lights.get(on)?.as_ref(),
         }
     }
 
@@ -106,6 +105,8 @@ impl App {
 enum Msg {
     OpenBattlenet,
     Play(GameCard),
+    /// The window's scale factor changed (e.g. moved to another monitor).
+    Scale(i32),
 }
 
 #[derive(Debug)]
@@ -161,7 +162,7 @@ impl Component for App {
                             set_margin_all: 24,
 
                             gtk::Picture {
-                                set_height_request: 240,
+                                set_height_request: ILLUSTRATION_HEIGHT,
                                 set_can_shrink: true,
                                 #[watch]
                                 set_paintable: model.illustration(),
@@ -254,12 +255,7 @@ impl Component for App {
         let model = App {
             rows: Vec::new(),
             house: read_house(),
-            empty: texture("empty.svg", EMPTY_SVG),
-            lights: LIGHTS_SVG
-                .iter()
-                .enumerate()
-                .map(|(on, bytes)| texture(&format!("progress-{on}.svg"), bytes))
-                .collect(),
+            art: Illustrations::render(root.scale_factor()),
             battlenet: BattlenetView::Closed,
             cards: Vec::new(),
             games,
@@ -267,6 +263,11 @@ impl Component for App {
         };
         let games_list = model.games.widget();
         let widgets = view_output!();
+        // The real scale is known once the window is on a monitor.
+        let scale_sender = sender.input_sender().clone();
+        root.connect_scale_factor_notify(move |window| {
+            scale_sender.emit(Msg::Scale(window.scale_factor()));
+        });
         let placeholder = gtk::Label::builder()
             .label("No games in the library yet")
             .margin_top(12)
@@ -335,6 +336,11 @@ impl Component for App {
     fn update(&mut self, message: Msg, sender: ComponentSender<Self>, _: &Self::Root) {
         match message {
             Msg::OpenBattlenet => self.act("Battle.net".to_owned(), Vec::new(), &sender),
+            Msg::Scale(scale) => {
+                if scale != self.art.scale {
+                    self.art = Illustrations::render(scale);
+                }
+            }
             Msg::Play(card) => {
                 if let Some(code) = card.launch_code {
                     self.act(card.name, vec![launch_argument(&code)], &sender);
@@ -407,17 +413,69 @@ fn read_games(house: &House) -> Vec<GameCard> {
     }
 }
 
-/// Loads an embedded SVG. A missing SVG loader (librsvg) must not take the
-/// window down: the illustration is then just not shown.
-fn texture(name: &str, bytes: &'static [u8]) -> Option<gtk::gdk::Texture> {
-    let bytes = gtk::glib::Bytes::from_static(bytes);
-    match gtk::gdk::Texture::from_bytes(&bytes) {
-        Ok(texture) => Some(texture),
-        Err(error) => {
-            eprintln!("snow-launcher: could not load the {name} illustration: {error}");
-            None
+/// Illustration height in the window, in logical pixels.
+const ILLUSTRATION_HEIGHT: i32 = 240;
+
+/// The illustrations, rasterized for one scale factor.
+struct Illustrations {
+    scale: i32,
+    empty: Option<gtk::gdk::Texture>,
+    /// The doghouse with 0 to 3 lights on.
+    lights: Vec<Option<gtk::gdk::Texture>>,
+}
+
+impl Illustrations {
+    fn render(scale: i32) -> Self {
+        let scale = scale.max(1);
+        Self {
+            scale,
+            empty: texture("empty.svg", EMPTY_SVG, scale),
+            lights: LIGHTS_SVG
+                .iter()
+                .enumerate()
+                .map(|(on, bytes)| texture(&format!("progress-{on}.svg"), bytes, scale))
+                .collect(),
         }
     }
+}
+
+/// Rasterizes an embedded SVG at the height it is shown, in device pixels
+/// (`ILLUSTRATION_HEIGHT` × `scale`). Loading the SVG at its own small
+/// size (128 px) and stretching it was what made it blurry.
+///
+/// A missing SVG loader (librsvg) must not take the window down: the
+/// illustration is then just not shown.
+fn texture(name: &str, bytes: &'static [u8], scale: i32) -> Option<gtk::gdk::Texture> {
+    use gtk::{gdk, gdk_pixbuf, gio, glib};
+    let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_static(bytes));
+    let height = ILLUSTRATION_HEIGHT * scale;
+    let pixbuf = match gdk_pixbuf::Pixbuf::from_stream_at_scale(
+        &stream,
+        -1,
+        height,
+        true,
+        gio::Cancellable::NONE,
+    ) {
+        Ok(pixbuf) => pixbuf,
+        Err(error) => {
+            eprintln!("snow-launcher: could not load the {name} illustration: {error}");
+            return None;
+        }
+    };
+    let format = if pixbuf.has_alpha() {
+        gdk::MemoryFormat::R8g8b8a8
+    } else {
+        gdk::MemoryFormat::R8g8b8
+    };
+    let stride = usize::try_from(pixbuf.rowstride()).ok()?;
+    let texture = gdk::MemoryTexture::new(
+        pixbuf.width(),
+        pixbuf.height(),
+        format,
+        &pixbuf.read_pixel_bytes(),
+        stride,
+    );
+    Some(texture.upcast())
 }
 
 fn main() {
