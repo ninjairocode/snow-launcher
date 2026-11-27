@@ -82,9 +82,11 @@ def bulbs(lit):
             f'<ellipse cx="0" cy="-7" rx="3.6" ry="4.6" fill="{fill}" stroke="#4a4453" stroke-width="1.4"/></g>\n')
     return "".join(parts)
 
-for stage in (1, 2, 3):
+# Etapa 0: Battle.net fechado, luzinhas apagadas.
+for stage in (0, 1, 2, 3):
     body = house + peek + bulbs(stage)
-    out[f"progress-{stage}.svg"] = doc(128, 128, f"Iniciando, etapa {stage} de 3", body)
+    title = "Battle.net fechado" if stage == 0 else f"Iniciando, etapa {stage} de 3"
+    out[f"progress-{stage}.svg"] = doc(128, 128, title, body)
 
 for name, text in out.items():
     open(f"{root}/data/illustrations/{name}", "w").write(text)

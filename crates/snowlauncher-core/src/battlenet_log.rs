@@ -32,6 +32,30 @@ pub struct ErrorSighting {
     pub timestamp: Option<String>,
 }
 
+/// How far a Battle.net session got in starting up (experiment E10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StartupStage {
+    /// `Logging started`: the app is up, nothing else yet.
+    Starting,
+    /// `AgentManager is now initialized`: the Agent is ready, login next.
+    AgentReady,
+    /// `State changed to: Ready` or `Logged into Battle.net successfully`.
+    Ready,
+}
+
+/// The furthest startup stage a session's log shows.
+pub fn startup_stage(log: &str) -> StartupStage {
+    if log.contains("[GSStateTracker] {Main} State changed to: Ready")
+        || log.contains("[BNLogin] {Main} Logged into Battle.net successfully")
+    {
+        StartupStage::Ready
+    } else if log.contains("[Agent] {Main} AgentManager is now initialized") {
+        StartupStage::AgentReady
+    } else {
+        StartupStage::Starting
+    }
+}
+
 /// What a second `Battle.net.exe` logs when it hands its arguments (open
 /// the window, `--exec=launch …`) to the running one and exits.
 const HANDOFF_MARKER: &str = "Leaving because another instance of battle.net is running";
@@ -81,6 +105,27 @@ fn line_timestamp(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_stages_from_real_lines() {
+        let started = "I 2026-11-27 20:58:31.348299 [Main] {Main} Logging started for Battle.net build 2.53.8.17986\n";
+        let agent = "I 2026-11-27 20:58:34.353143 [Agent] {Main} AgentManager is now initialized\n";
+        let login = "I 2026-11-27 20:58:37.167962 [GSAccountProvider] {Main} Login triggered. entityId=1:0:4a39dac\n";
+        let ready =
+            "I 2026-11-27 20:58:37.704833 [GSStateTracker] {Main} State changed to: Ready\n";
+        let logged = "I 2026-11-27 20:58:37.815792 [BNLogin] {Main} Logged into Battle.net successfully. |bnet=1:0:4a39dac\n";
+
+        assert_eq!(startup_stage(""), StartupStage::Starting);
+        assert_eq!(startup_stage(started), StartupStage::Starting);
+        let mut log = format!("{started}{agent}{login}");
+        assert_eq!(startup_stage(&log), StartupStage::AgentReady);
+        log.push_str(ready);
+        assert_eq!(startup_stage(&log), StartupStage::Ready);
+        assert_eq!(
+            startup_stage(&format!("{started}{agent}{logged}")),
+            StartupStage::Ready
+        );
+    }
 
     #[test]
     fn recognizes_handoff_runs() {

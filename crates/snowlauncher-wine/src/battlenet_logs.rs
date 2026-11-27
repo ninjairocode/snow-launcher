@@ -11,10 +11,10 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use snowlauncher_core::battlenet_log::is_handoff;
+use snowlauncher_core::battlenet_log::{StartupStage, is_handoff, startup_stage};
 
 use crate::prefix::WinePrefix;
 
@@ -60,6 +60,24 @@ fn client_logs_in(prefix: &Path) -> io::Result<Vec<PathBuf>> {
     // The timestamp in the name sorts chronologically as text.
     logs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     Ok(logs)
+}
+
+/// The startup markers come in the first seconds, well inside this.
+const STAGE_READ_BYTES: u64 = 1024 * 1024;
+
+/// The newest session log of the prefix at `prefix`, if any.
+pub fn newest_session_log(prefix: &Path) -> Option<PathBuf> {
+    client_logs_in(prefix).ok()?.into_iter().next()
+}
+
+/// How far the session of `log` got in starting up. Reads only the start
+/// of the file.
+pub fn session_stage(log: &Path) -> io::Result<StartupStage> {
+    let mut head = Vec::new();
+    fs::File::open(log)?
+        .take(STAGE_READ_BYTES)
+        .read_to_end(&mut head)?;
+    Ok(startup_stage(&String::from_utf8_lossy(&head)))
 }
 
 fn is_handoff_log(path: &Path) -> bool {
@@ -129,6 +147,26 @@ mod tests {
                 "battle.net-20261126T134027.115323.log",
             ]
         );
+    }
+
+    #[test]
+    fn stage_of_the_newest_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp
+            .path()
+            .join("drive_c/users/steamuser/AppData/Local/Battle.net/Logs");
+        fs::create_dir_all(&logs).unwrap();
+        assert_eq!(newest_session_log(tmp.path()), None);
+
+        let log = logs.join("battle.net-20261127T205831.347136.log");
+        fs::write(
+            &log,
+            "I 2026-11-27 20:58:34.353143 [Agent] {Main} AgentManager is now initialized\n",
+        )
+        .unwrap();
+        let newest = newest_session_log(tmp.path()).unwrap();
+        assert_eq!(newest.file_name(), log.file_name());
+        assert_eq!(session_stage(&newest).unwrap(), StartupStage::AgentReady);
     }
 
     #[test]
