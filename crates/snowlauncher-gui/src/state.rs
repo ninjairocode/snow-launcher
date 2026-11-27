@@ -1,8 +1,10 @@
 //! What the window shows, from what `snowd` and the house report. Pure:
 //! the window only displays what these functions decide.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
+use snowlauncher_core::battlenet_log::StartupStage;
 use snowlauncher_core::dbus::GameConnection;
 use snowlauncher_core::house::BATTLENET_EXE;
 use snowlauncher_wine::daemon_client::DaemonState;
@@ -98,32 +100,120 @@ pub fn read_house() -> House {
     }
 }
 
+/// Battle.net in the house, as the window shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BattlenetView {
+    Closed,
+    Starting,
+    LoggingIn,
+    /// Not ready after [`LOGIN_WAIT`]: the login screen is waiting.
+    WaitingForLogin,
+    Ready,
+}
+
+/// A session that is not ready after this is waiting for the user to log
+/// in (experiment E10: a saved login is ready in ~6 s).
+pub const LOGIN_WAIT: Duration = Duration::from_secs(30);
+
+/// Follows Battle.net sessions across refreshes, to know which log is the
+/// current session's. Right after Battle.net starts, its new log may not
+/// exist yet and the newest one is the previous session's (maybe "ready").
+/// So the newest log seen while Battle.net was closed never counts.
+#[derive(Debug, Default)]
+pub struct SessionTracker {
+    old_log: Option<PathBuf>,
+    started_at: Option<Instant>,
+    /// The current session's log and the last stage read from it.
+    session: Option<(PathBuf, StartupStage)>,
+}
+
+impl SessionTracker {
+    /// `read_stage` is only called when needed: a session already ready
+    /// is not read again.
+    pub fn update(
+        &mut self,
+        running: bool,
+        newest_log: Option<PathBuf>,
+        now: Instant,
+        read_stage: impl FnOnce(&Path) -> Option<StartupStage>,
+    ) -> BattlenetView {
+        if !running {
+            self.old_log = newest_log;
+            self.started_at = None;
+            self.session = None;
+            return BattlenetView::Closed;
+        }
+        let started_at = *self.started_at.get_or_insert(now);
+        let stage = match newest_log.filter(|log| Some(log) != self.old_log.as_ref()) {
+            None => None,
+            Some(log) => match &self.session {
+                Some((known, StartupStage::Ready)) if *known == log => Some(StartupStage::Ready),
+                _ => {
+                    let stage = read_stage(&log);
+                    self.session = stage.map(|stage| (log, stage));
+                    stage
+                }
+            },
+        };
+        match stage {
+            Some(StartupStage::Ready) => BattlenetView::Ready,
+            _ if now.saturating_duration_since(started_at) >= LOGIN_WAIT => {
+                BattlenetView::WaitingForLogin
+            }
+            Some(StartupStage::AgentReady) => BattlenetView::LoggingIn,
+            _ => BattlenetView::Starting,
+        }
+    }
+}
+
 /// Which illustration goes with a house state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Illustration {
     Empty,
-    Ready,
+    /// The doghouse with this many lights on (0 to 3).
+    Lights(usize),
 }
 
 /// Illustration, title and description for the house part of the window.
-pub fn house_text(house: &House) -> (Illustration, &'static str, String) {
-    match house {
-        House::Missing => (
+pub fn house_text(house: &House, battlenet: BattlenetView) -> (Illustration, &'static str, String) {
+    let (illustration, title, text) = match (house, battlenet) {
+        (House::Missing, _) => (
             Illustration::Empty,
             "No house yet",
-            "Create Snow Launcher's Battle.net house with `snowctl house create`.".to_owned(),
+            "Create Snow Launcher's Battle.net house with `snowctl house create`.",
         ),
-        House::NoBattlenet => (
+        (House::NoBattlenet, _) => (
             Illustration::Empty,
             "Battle.net is not installed",
-            "Install it with `snowctl house install-battlenet --installer PATH`.".to_owned(),
+            "Install it with `snowctl house install-battlenet --installer PATH`.",
         ),
-        House::Ready { prefix, .. } => (
-            Illustration::Ready,
-            "The house is ready",
-            format!("Battle.net lives in {}.", prefix.display()),
+        (House::Ready { .. }, BattlenetView::Closed) => (
+            Illustration::Lights(0),
+            "Battle.net is closed",
+            "Open it with the button above, or press Play on a game.",
         ),
-    }
+        (House::Ready { .. }, BattlenetView::Starting) => (
+            Illustration::Lights(1),
+            "Starting Battle.net…",
+            "Step 1 of 3: opening the app.",
+        ),
+        (House::Ready { .. }, BattlenetView::LoggingIn) => (
+            Illustration::Lights(2),
+            "Logging in…",
+            "Step 2 of 3: the Battle.net Agent is ready.",
+        ),
+        (House::Ready { .. }, BattlenetView::WaitingForLogin) => (
+            Illustration::Lights(2),
+            "Waiting for you to log in",
+            "Log in in Battle.net's own window.",
+        ),
+        (House::Ready { .. }, BattlenetView::Ready) => (
+            Illustration::Lights(3),
+            "Battle.net is ready",
+            "Logged in. Pick a game below.",
+        ),
+    };
+    (illustration, title, text.to_owned())
 }
 
 /// One game of the library, as its row shows it.
@@ -206,10 +296,15 @@ mod tests {
 
     #[test]
     fn each_house_state_has_its_illustration_and_hint() {
-        assert_eq!(house_text(&House::Missing).0, Illustration::Empty);
-        assert!(house_text(&House::Missing).2.contains("house create"));
+        let closed = BattlenetView::Closed;
+        assert_eq!(house_text(&House::Missing, closed).0, Illustration::Empty);
         assert!(
-            house_text(&House::NoBattlenet)
+            house_text(&House::Missing, closed)
+                .2
+                .contains("house create")
+        );
+        assert!(
+            house_text(&House::NoBattlenet, closed)
                 .2
                 .contains("install-battlenet")
         );
@@ -217,8 +312,83 @@ mod tests {
             prefix: PathBuf::from("/pfx"),
             library: PathBuf::from("/games"),
         };
-        assert_eq!(house_text(&ready).0, Illustration::Ready);
         assert!(ready.is_ready() && !House::NoBattlenet.is_ready());
+        let lights: Vec<Illustration> = [
+            BattlenetView::Closed,
+            BattlenetView::Starting,
+            BattlenetView::LoggingIn,
+            BattlenetView::Ready,
+        ]
+        .into_iter()
+        .map(|view| house_text(&ready, view).0)
+        .collect();
+        assert_eq!(
+            lights,
+            (0..=3).map(Illustration::Lights).collect::<Vec<_>>()
+        );
+    }
+
+    fn log(name: &str) -> Option<PathBuf> {
+        Some(PathBuf::from(name))
+    }
+
+    #[test]
+    fn the_previous_sessions_log_never_counts() {
+        let mut tracker = SessionTracker::default();
+        let t0 = Instant::now();
+        let never = |_: &Path| -> Option<StartupStage> { panic!("must not read") };
+        // Closed; the newest log is an old, ready session.
+        assert_eq!(
+            tracker.update(false, log("old"), t0, never),
+            BattlenetView::Closed
+        );
+        // Started, but its log is not there yet: not "ready".
+        assert_eq!(
+            tracker.update(true, log("old"), t0, never),
+            BattlenetView::Starting
+        );
+        // Its own log appears.
+        let view = tracker.update(true, log("new"), t0 + Duration::from_secs(3), |_| {
+            Some(StartupStage::AgentReady)
+        });
+        assert_eq!(view, BattlenetView::LoggingIn);
+        let view = tracker.update(true, log("new"), t0 + Duration::from_secs(6), |_| {
+            Some(StartupStage::Ready)
+        });
+        assert_eq!(view, BattlenetView::Ready);
+        // Ready sessions are not read again.
+        let later = t0 + Duration::from_secs(600);
+        assert_eq!(
+            tracker.update(true, log("new"), later, never),
+            BattlenetView::Ready
+        );
+    }
+
+    #[test]
+    fn a_session_already_running_uses_the_newest_log() {
+        let mut tracker = SessionTracker::default();
+        let view = tracker.update(true, log("current"), Instant::now(), |_| {
+            Some(StartupStage::Ready)
+        });
+        assert_eq!(view, BattlenetView::Ready);
+    }
+
+    #[test]
+    fn not_ready_after_a_while_is_waiting_for_login() {
+        let mut tracker = SessionTracker::default();
+        let t0 = Instant::now();
+        let agent = |_: &Path| Some(StartupStage::AgentReady);
+        assert_eq!(
+            tracker.update(true, log("s"), t0, agent),
+            BattlenetView::LoggingIn
+        );
+        let view = tracker.update(true, log("s"), t0 + LOGIN_WAIT, agent);
+        assert_eq!(view, BattlenetView::WaitingForLogin);
+        // Logging in afterwards makes it ready.
+        let view = tracker.update(true, log("s"), t0 + LOGIN_WAIT * 2, |_| {
+            Some(StartupStage::Ready)
+        });
+        assert_eq!(view, BattlenetView::Ready);
     }
 
     fn game(code: Option<&str>, version: Option<&str>) -> InstalledGame {

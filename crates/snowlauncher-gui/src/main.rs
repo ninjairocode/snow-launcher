@@ -1,7 +1,8 @@
 //! `snow-launcher`: Snow Launcher's window (v0.3, first step).
 //!
-//! It shows what `snowd` sees (over D-Bus), the state of the house with
-//! the doghouse illustrations, and the library's games. "Open Battle.net"
+//! It shows what `snowd` sees (over D-Bus), the house and how far
+//! Battle.net got in starting (the doghouse's lights, one per stage, from
+//! its log), and the library's games. "Open Battle.net"
 //! and "Play" run off the window's thread and report with a toast. Layout rules from experiment E7: `adw::ToolbarView`, an
 //! illustration that fails to load is simply not shown, and `adw::Clamp`
 //! falls back to pixels when the desktop publishes no text DPI.
@@ -9,35 +10,45 @@
 mod games;
 mod state;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use relm4::adw::prelude::*;
 use relm4::factory::FactoryVecDeque;
 use relm4::{Component, ComponentParts, ComponentSender, RelmApp, RelmWidgetExt, adw, gtk};
+use snowlauncher_wine::battlenet_logs::{newest_session_log, session_stage};
 use snowlauncher_wine::daemon_client::query_async;
-use snowlauncher_wine::house::{launch_argument, open_house, run_battlenet};
+use snowlauncher_wine::house::{battlenet_pid, launch_argument, open_house, run_battlenet};
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 
 use crate::games::GameRow;
 use crate::state::{
-    GameCard, House, Illustration, StatusRow, action_message, game_cards, house_text, read_house,
-    status_rows,
+    BattlenetView, GameCard, House, Illustration, SessionTracker, StatusRow, action_message,
+    game_cards, house_text, read_house, status_rows,
 };
 
 const APP_ID: &str = "io.github.ninjairocode.SnowLauncher";
 const REFRESH_EVERY: Duration = Duration::from_secs(3);
+/// Faster while Battle.net starts, so each light is seen.
+const REFRESH_WHILE_STARTING: Duration = Duration::from_secs(1);
 const STATUS_ROWS: usize = 4;
 /// Games are read less often: it means reading Battle.net's logs.
-const GAMES_EVERY_N_REFRESHES: u32 = 10;
+const GAMES_EVERY: Duration = Duration::from_secs(30);
 
 const EMPTY_SVG: &[u8] = include_bytes!("../../../data/illustrations/empty.svg");
-const READY_SVG: &[u8] = include_bytes!("../../../data/illustrations/progress-3.svg");
+/// The doghouse with 0 to 3 lights on.
+const LIGHTS_SVG: [&[u8]; 4] = [
+    include_bytes!("../../../data/illustrations/progress-0.svg"),
+    include_bytes!("../../../data/illustrations/progress-1.svg"),
+    include_bytes!("../../../data/illustrations/progress-2.svg"),
+    include_bytes!("../../../data/illustrations/progress-3.svg"),
+];
 
 struct App {
     rows: Vec<StatusRow>,
     house: House,
     empty: Option<gtk::gdk::Texture>,
-    ready: Option<gtk::gdk::Texture>,
+    lights: Vec<Option<gtk::gdk::Texture>>,
+    battlenet: BattlenetView,
     cards: Vec<GameCard>,
     games: FactoryVecDeque<GameRow>,
     /// An action is running: buttons are disabled until it ends.
@@ -46,10 +57,14 @@ struct App {
 
 impl App {
     fn illustration(&self) -> Option<&gtk::gdk::Texture> {
-        match house_text(&self.house).0 {
+        match self.text().0 {
             Illustration::Empty => self.empty.as_ref(),
-            Illustration::Ready => self.ready.as_ref(),
+            Illustration::Lights(on) => self.lights.get(on)?.as_ref(),
         }
+    }
+
+    fn text(&self) -> (Illustration, &'static str, String) {
+        house_text(&self.house, self.battlenet)
     }
 
     fn row_title(&self, index: usize) -> &str {
@@ -98,6 +113,7 @@ enum CommandOutput {
     Refreshed {
         rows: Vec<StatusRow>,
         house: House,
+        battlenet: BattlenetView,
         /// `None`: not read this time, keep the current list.
         cards: Option<Vec<GameCard>>,
     },
@@ -157,14 +173,14 @@ impl Component for App {
                                 set_wrap: true,
                                 set_justify: gtk::Justification::Center,
                                 #[watch]
-                                set_label: house_text(&model.house).1,
+                                set_label: model.text().1,
                             },
                             gtk::Label {
                                 add_css_class: "dim-label",
                                 set_wrap: true,
                                 set_justify: gtk::Justification::Center,
                                 #[watch]
-                                set_label: &house_text(&model.house).2,
+                                set_label: &model.text().2,
                             },
                             gtk::ListBox {
                                 add_css_class: "boxed-list",
@@ -239,7 +255,12 @@ impl Component for App {
             rows: Vec::new(),
             house: read_house(),
             empty: texture("empty.svg", EMPTY_SVG),
-            ready: texture("progress-3.svg", READY_SVG),
+            lights: LIGHTS_SVG
+                .iter()
+                .enumerate()
+                .map(|(on, bytes)| texture(&format!("progress-{on}.svg"), bytes))
+                .collect(),
+            battlenet: BattlenetView::Closed,
             cards: Vec::new(),
             games,
             busy: false,
@@ -267,18 +288,42 @@ impl Component for App {
         sender.command(|out, shutdown| {
             shutdown
                 .register(async move {
-                    for round in 0u32.. {
+                    let mut tracker = SessionTracker::default();
+                    let mut games_read: Option<Instant> = None;
+                    let mut was_ready = false;
+                    loop {
                         let rows = status_rows(&query_async().await);
                         let house = read_house();
-                        let cards =
-                            (round % GAMES_EVERY_N_REFRESHES == 0).then(|| read_games(&house));
-                        if out
-                            .send(CommandOutput::Refreshed { rows, house, cards })
-                            .is_err()
-                        {
+                        let battlenet = battlenet_view(&house, &mut tracker);
+                        let is_ready = battlenet == BattlenetView::Ready;
+                        // Launch codes show up in the log at login: reread
+                        // the games then, besides every 30 s.
+                        let games_due = games_read.is_none_or(|at| at.elapsed() >= GAMES_EVERY)
+                            || (is_ready && !was_ready);
+                        was_ready = is_ready;
+                        let cards = games_due.then(|| {
+                            games_read = Some(Instant::now());
+                            read_games(&house)
+                        });
+                        let starting = matches!(
+                            battlenet,
+                            BattlenetView::Starting | BattlenetView::LoggingIn
+                        );
+                        let message = CommandOutput::Refreshed {
+                            rows,
+                            house,
+                            battlenet,
+                            cards,
+                        };
+                        if out.send(message).is_err() {
                             break;
                         }
-                        tokio::time::sleep(REFRESH_EVERY).await;
+                        let pause = if starting {
+                            REFRESH_WHILE_STARTING
+                        } else {
+                            REFRESH_EVERY
+                        };
+                        tokio::time::sleep(pause).await;
                     }
                 })
                 .drop_on_shutdown()
@@ -306,9 +351,15 @@ impl Component for App {
         _: &Self::Root,
     ) {
         match message {
-            CommandOutput::Refreshed { rows, house, cards } => {
+            CommandOutput::Refreshed {
+                rows,
+                house,
+                battlenet,
+                cards,
+            } => {
                 self.rows = rows;
                 self.house = house;
+                self.battlenet = battlenet;
                 if let Some(cards) = cards.filter(|cards| *cards != self.cards) {
                     let mut guard = self.games.guard();
                     guard.clear();
@@ -327,6 +378,23 @@ impl Component for App {
         }
         self.update_view(widgets, sender);
     }
+}
+
+/// Whether Battle.net runs in the house and how far it got, from its
+/// processes and its session log.
+fn battlenet_view(house: &House, tracker: &mut SessionTracker) -> BattlenetView {
+    let House::Ready { prefix, .. } = house else {
+        return BattlenetView::Closed;
+    };
+    // Processes are matched by their canonical WINEPREFIX.
+    let prefix = std::fs::canonicalize(prefix).unwrap_or_else(|_| prefix.clone());
+    let running = battlenet_pid(&prefix).ok().flatten().is_some();
+    tracker.update(
+        running,
+        newest_session_log(&prefix),
+        Instant::now(),
+        |log| session_stage(log).ok(),
+    )
 }
 
 /// The library's games, with launch codes from Battle.net's logs.
