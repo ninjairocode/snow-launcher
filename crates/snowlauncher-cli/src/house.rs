@@ -22,8 +22,8 @@ use snowlauncher_core::process::ProcessRole;
 use snowlauncher_core::process::{ProcessTable, processes_in_prefix};
 use snowlauncher_wine::desktop::desktop_dpi;
 use snowlauncher_wine::house::{
-    self as executor, UmuRunner, create_log_path, launch_argument, load_record, open_log_path,
-    record_path, save_record,
+    self as executor, UmuRunner, create_log_path, launch_argument, load_record, record_path,
+    save_record,
 };
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 use snowlauncher_wine::prefix::{default_prefix_path, prefixes_root};
@@ -284,25 +284,12 @@ const START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The house's record, its canonical prefix and a runner for it.
 fn house_runner() -> Result<(executor::HouseRecordView, UmuRunner)> {
-    let record_file = record_path().context("could not determine the state directory")?;
-    let record = load_record(&record_file)?
-        .context("there is no house yet; create it first with `snowctl house create`")?;
-    let prefix = fs::canonicalize(&record.prefix)
-        .with_context(|| format!("the house's prefix {} is missing", record.prefix.display()))?;
-    let runner = UmuRunner {
-        umu_run: find_umu_run()
-            .context("umu-run not found: install umu-launcher (or Lutris, which bundles it)")?,
-        prefix: prefix.clone(),
-        runtime: record.runtime_path.clone(),
-        log: open_log_path().context("could not determine the state directory")?,
-    };
-    Ok((
-        executor::HouseRecordView {
-            prefix,
-            library: record.library,
-        },
-        runner,
-    ))
+    executor::open_house().map_err(|error| match error {
+        executor::OpenHouseError::NoHouse => {
+            anyhow::anyhow!("there is no house yet; create it first with `snowctl house create`")
+        }
+        other => other.into(),
+    })
 }
 
 /// Runs Battle.net with `args` and, if it had to start, waits until its
