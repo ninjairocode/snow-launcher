@@ -76,11 +76,12 @@ O Snow Launcher **não** promete que o Battle.net roda mais rápido que num Lutr
 | Distribuição inicial | **AppImage** (GitHub Releases) |
 | Abordagem | Envolver o Battle.net oficial (nunca substituí-lo) |
 | Janela do Battle.net | Não é embutida. Roda escondida, e a casinha mostra o progresso; a janela só aparece para login, loja/amigos ou erro |
-| Onde ficam os jogos | Na **biblioteca**, fora do prefixo, mapeada como `G:`. Importar sempre **move** o jogo para a biblioteca |
+| Onde ficam os jogos | Na **biblioteca**, fora do prefixo, mapeada como `G:`. Importar **copia por reflink** quando o sistema de arquivos permite (btrfs, XFS: instantâneo, sem espaço extra, o outro launcher continua funcionando) e, senão, move |
 | Transparência | "Projeto Assistido por IA" no README + trailer `Assisted-by:` |
 | Commits | Feitos manualmente pelo mantenedor, com orientação do Claude |
 | Licença | **GPL-3.0-or-later**, a mesma família do umu-launcher, comum no ecossistema GNOME (arquivo `LICENSE`) |
 | App ID | `io.github.ninjairocode.SnowLauncher` |
+| Base mínima suportada | **Ubuntu 24.04 LTS**: GTK 4.14 e libadwaita 1.5 (cobre Fedora 40+, Arch, Debian 13). Libera o `adw::ToolbarView` (1.4+); deixa de fora o Ubuntu 22.04 (GTK 4.6, libadwaita 1.1). Toda tela da GUI é testada nessa base (E7) |
 | Versão mínima do Rust (MSRV) | **1.85** (edition 2024), verificada no CI. Subir quando uma dependência exigir |
 | Configuração | `~/.config/snow-launcher/config.toml`, `schema = 1`. Chaves: `prefix` e `[sleep] allow_suspend_while_playing`. Erros no arquivo viram avisos, nunca param o daemon |
 | Suspensão com jogo aberto | **Bloqueada por padrão** (portal Inhibit, só a flag *Suspend*); liberável no `config.toml`. Ver seção 5 |
@@ -255,15 +256,18 @@ O Snow Launcher oferece três caminhos. O assistente de primeira execução perg
 
 **3 – Importar instalação existente (o mais importante para quem já joga)**
 
-Importar sempre **move o jogo para a biblioteca do Snow** (ver "Casinha e biblioteca"). Não existe a opção de usar o jogo no lugar, para o jogo nunca depender da pasta de outro launcher.
+Importar sempre traz o jogo **para a biblioteca do Snow** (ver "Casinha e biblioteca"). Não existe a opção de usar o jogo no lugar, para o jogo nunca depender da pasta de outro launcher.
+
+**Copiar por reflink, quando der (preferido):** em btrfs e XFS no mesmo sistema de arquivos, `cp --reflink=always` faz uma cópia **independente e instantânea, sem gastar espaço**: as duas pastas compartilham os blocos até um lado mudar um arquivo. O jogo passa a existir na casinha **e** continua funcionando no outro launcher. Validado com o WoW do mantenedor: 49,6 GB e 4.942 arquivos em 1 s, ocupando 14 MB (O9). Sem reflink, vale o fluxo de mover abaixo.
 
 1. Detectar prefixos do Lutris, da Steam (compatdata) e do Faugus, e as pastas de jogos Blizzard dentro deles (`World of Warcraft`, `Diablo IV` etc.).
 2. Mostrar o que foi encontrado, com tamanho, e explicar antes de confirmar: **"Depois de mover, este jogo deixa de funcionar no Lutris."**
 3. Conferir antes de mover:
    - o Battle.net e o jogo **não podem estar abertos** no outro launcher (processos com aquele `WINEPREFIX`);
    - se a biblioteca está em **outro disco**, verificar se há espaço livre suficiente.
-4. Mover:
-   - **Mesmo disco:** `rename` da pasta. É instantâneo e atômico, não copia nada.
+4. Trazer:
+   - **Reflink disponível:** copiar por reflink e conferir arquivo a arquivo (caminho e tamanho); o original fica intacto.
+   - **Mesmo disco, sem reflink:** `rename` da pasta. É instantâneo e atômico, não copia nada.
    - **Outro disco:** copiar → verificar (quantidade de arquivos e tamanhos) → só então **oferecer** apagar o original. Nunca apagar antes de confirmar a cópia. Se a cópia for interrompida, a pasta parcial é descartada e o original continua intacto.
 5. Abrir a casinha e guiar o usuário no **"Localizar jogo"** do Battle.net, apontando para `G:\<nome do jogo>`. O Battle.net verifica os arquivos e baixa só o que faltar.
 6. Registrar no histórico de onde o jogo veio, para facilitar o suporte.
@@ -319,6 +323,7 @@ Cada linha vira um caso de teste da função pura. As linhas não validadas na p
 
 - As **três chaves `LogPixels`** que o Lutris também usa: `HKCU\Control Panel\Desktop`, `HKCU\Software\Wine\Fonts` e `HKLM\System\CurrentControlSet\Hardware Profiles\Current\Software\Fonts`.
 - Por uma ação declarativa de quirk (`set_registry`), com backup, registro no histórico e reversível, como todas as ações da seção 7.
+- **Junto com `QT_ENABLE_HIGHDPI_SCALING=0` em tudo o que roda na casinha (obrigatório).** O instalador e a janela de login do Battle.net são Qt 5.15.1. Acima de 100% de DPI, o Qt liga um modo próprio de escala para alta densidade que, no Wine, **trava o instalador** e **quebra a etapa da senha do login** (violação de acesso no `Qt5Core.dll`). Com esse modo desligado, o Qt usa o DPI do Wine para o tamanho de textos e elementos: tudo funciona e fica legível a 192 (E11, O9). A janela principal do Battle.net é desenhada pelo CEF e não tem o problema, por isso o E8 (com sessão salva) não o mostrou.
 
 #### Opção do usuário
 
@@ -602,7 +607,9 @@ Pendente:
 
 - Publicado no **GitHub Releases** com `SHA256SUMS`.
 - Usar o **runtime estático novo do AppImage** (type2-runtime), que **não depende de libfuse2** no sistema. Isso evita o problema clássico no Fedora.
-- **GTK4/libadwaita dentro do AppImage**: empacotar com `linuxdeploy` + plugin GTK. Testar em Fedora, Ubuntu LTS e Arch. Este é o ponto mais delicado do empacotamento.
+- **GTK4/libadwaita do sistema (validado no E7, O10)**: um AppImage de 1,2 MB, **sem embutir o GTK**, rodou no Fedora 45, no Ubuntu 24.04 e no Arch. O binário usa só a API base do GTK e exige glibc 2.34. Embutir o GTK (`linuxdeploy` + plugin GTK) fica como plano B para distros sem libadwaita.
+- **Montagem sem o `appimagetool`** (que não publica hash nem assinatura): o runtime `type2-runtime` numa **tag fixa** (hoje `20251108`), com a **assinatura GPG conferida** contra a impressão digital `570C 77AC EA40 C0F1 B758 902C BF96 CCA5 6490 F695` gravada no repositório, seguido do squashfs gerado pelo `mksquashfs` da distro. O único binário de fora que roda é o runtime verificado.
+- **Lições do E7 para a GUI:** o `adw::StatusPage` da libadwaita 1.5 quebra o layout (título letra por letra, imagem com altura 0), então evitar ou contornar; testar toda tela na base mínima (Ubuntu 24.04), não só no Fedora; funcionar também com desenho por software (sem GPU); uma ilustração SVG nunca pode derrubar o app se faltar o `librsvg`.
 - **Atualização**: publicar `.zsync` e informações de update embutidas (compatível com AppImageUpdate/Gear Lever).
 - **Integração com systemd + AppImage**: a unidade do serviço precisa apontar para o caminho do AppImage, que pode mudar. A cada execução, o app confere `$APPIMAGE` e **atualiza a unidade se o caminho mudou**.
 - Arquivos `.desktop` e `metainfo.xml` com o ícone `io.github.ninjairocode.SnowLauncher.svg`.
@@ -639,7 +646,7 @@ Assisted-by: Claude (Anthropic)
 |---|---|---|
 | **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda | Parcial: E4 em parte, mais as observações O1–O4 |
 | **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso de conexão perdida, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` | **Quase pronta** (ver 12.1) |
-| **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão (Windows 11, **escala automática**), opções globais de **MangoHud e GameMode** | Não começou; o E6 validou o caminho (O6) |
+| **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão (Windows 11, **escala automática**), opções globais de **MangoHud e GameMode** | Em andamento (O9): `house create`/`remove`, `install-battlenet` com assinatura verificada e vigia, `house open`, Windows 11, DPI do desktop com a correção do Qt. Faltam: GE-Proton próprio (baixar/fixar/voltar), importação como comando, MangoHud/GameMode |
 | **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar" e os **ícones dos jogos tirados dos executáveis**, tela de progresso de inicialização com o Snow e as luzinhas, configurações, notificações, portal Background, **bandeja só com o Snow** (ícone simbólico; esconder o do Battle.net depende do E9), controle do Battle.net validado (E5, E9, E10) | Não começou; identidade visual desenhada |
 | **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções | Não começou |
 | **v0.5** | Gamescope por jogo, MangoHud por jogo, perfis isolados por jogo, escolha do Proton (pastas da Steam/ProtonPlus) com backup do prefixo | Não começou |
@@ -679,9 +686,10 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 | E4 | Script que escuta `PrepareForSleep` e reinicia o Battle.net | Resolve a reconexão? Reiniciar o Battle.net com o WoW aberto causa algum problema? | Em parte: o sinal chega e o Battle.net reconecta sozinho depois de suspensões curtas (O2). Falta suspensão longa e reiniciar com o WoW aberto |
 | E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | **Metade validada** (O8): `--exec="launch WoWF"` abre o jogo (código do produto, não o *uid*). Falta: o jogo herda o ambiente? gamescope por jogo? |
 | E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? | **Respondido** (O6): o instalador não trava (~78 s); o "Localizar jogo" reaproveitou os 49 GB; o jogo roda em `G:`; a loja abre com Windows 11. Testado com `G:` apontando para a pasta existente, sem mover |
-| E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? | Pendente |
+| E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? | **Validado** (O10): com o GTK do sistema, nas três. Armadilha: `adw::StatusPage` na libadwaita 1.5. Não testados: Ubuntu de verdade (com GPU e FUSE), Ubuntu 22.04, sessão X11 |
 | E8 | DPI do Wine igual ao `Xft.dpi` do desktop (192 com GNOME a 125%) contra 144 e 96 | O Battle.net e o instalador ficam do mesmo tamanho que os outros aplicativos? Qual é o melhor padrão automático? | **Validado no GNOME 125%** (O7): `Xft.dpi` (192) ficou ideal. Faltam outras escalas, KDE, X11 e vários monitores |
 | E9 | Esconder o ícone do Battle.net na bandeja (Wine/Battle.net) e reabrir a janela por fora (rodar o `Battle.net.exe` de novo com ele já aberto) | Dá para esconder? A janela volta quando o Battle.net está só na bandeja? | **Janela volta: validado** (O8). Falta descobrir como esconder o ícone |
+| E11 | Instalador e login a 192 DPI com `QT_ENABLE_HIGHDPI_SCALING=0` | Por que o instalador trava e o login quebra a 192? Dá para manter 192? | **Resolvido** (O9): o modo de alta densidade do Qt 5.15 sob o Wine; desligado, tudo funciona e fica legível a 192 |
 | E10 | Fechar o Battle.net por fora (`taskkill` sem `/f`, depois `wineserver -k`) e mapear nos logs as etapas da inicialização | Fecha de verdade ou só vai para a bandeja? O Agent sai junto? Quais linhas de log marcam "aguardando login" e "pronto"? | **Validado** (O8): fecha de verdade, o Agent sai em ~10 s, marcas mapeadas |
 
 ## 14 – Riscos
