@@ -318,3 +318,29 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 ### Lição de método
 
 - Um contêiner não é um desktop: além dos drivers de vídeo (O10), faltam serviços como o de configurações. Antes de culpar uma versão de biblioteca, comparar o **mesmo ambiente** com e sem a peça suspeita.
+
+## O12 – E12: o item do Snow na bandeja
+
+**Data:** 2026-11-27
+**Ambiente:** Fedora 45, GNOME Shell 51.1 com a extensão AppIndicator (`appindicatorsupport@rgcjonas.gmail.com`), DPI 192. Programa de teste descartável com `zbus` 5.13.2 (o mesmo do projeto): um `org.kde.StatusNotifierItem` registrado no `org.kde.StatusNotifierWatcher`, com um menu `com.canonical.dbusmenu`. O programa só registrava os cliques, sem executar nada.
+
+### Resultados
+
+1. **Por que o ícone do Battle.net fica borrado:** com o Battle.net aberto, os únicos itens StatusNotifierItem no D-Bus eram o Discord e o CurseForge. O Battle.net usa, pelo Wine, a **bandeja antiga do X11 (XEmbed)**, que manda um bitmap pequeno, e a extensão amplia esse bitmap.
+2. **Ícone por nome:** `IconName` = `io.github.ninjairocode.SnowLauncher`, com `IconThemePath` apontando para uma pasta própria.
+   - Com o SVG em `hicolor/scalable/apps/` **sem `index.theme`**, a extensão mostrou **três pontinhos** (ícone não encontrado).
+   - Com o SVG **solto na raiz** do `IconThemePath`, o ícone apareceu **nítido** a 192 DPI.
+3. **Menu:** a extensão leu o menu logo no registro (`GetLayout`, `AboutToShow`), e os itens apareceram normais. Cada clique chegou como `Event(id, "clicked")`, logo depois do evento `closed` do menu: "Open Snow Launcher", "Open Battle.net" e "Quit test" (que encerrou o teste).
+4. **Clique esquerdo:** em 9 aberturas do menu, **nenhum `Activate`** chegou. Nesta extensão, com um menu publicado, o clique esquerdo também abre o menu.
+
+### Consequências
+
+- O item da bandeja é feito com `zbus` (já usado no projeto), sem biblioteca de bandeja extra.
+- O ícone vai como arquivo solto no `IconThemePath`, e o menu concentra todas as ações, com "Abrir Snow Launcher" em primeiro.
+- O ícone colorido ficou legível. A versão simbólica continua planejada, para seguir o estilo da barra do GNOME.
+
+### Em aberto
+
+- KDE (StatusNotifierItem nativo) e outras versões da extensão AppIndicator.
+- Quem mostra o item: o `snowd` (sempre rodando) ou a GUI em segundo plano.
+- Como esconder o ícone do Battle.net (E9).
