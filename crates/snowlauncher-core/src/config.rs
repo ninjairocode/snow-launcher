@@ -9,11 +9,16 @@
 //! ```toml
 //! schema = 1
 //!
+//! # Wine prefix to watch. Absolute, or starting with `~/`.
+//! # Defaults to Snow Launcher's own prefix.
+//! prefix = "~/Games/battlenet"
+//!
 //! [sleep]
 //! allow_suspend_while_playing = false
 //! ```
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -24,6 +29,8 @@ pub const CURRENT_SCHEMA: u32 = 1;
 #[serde(default)]
 pub struct Config {
     pub schema: u32,
+    /// Wine prefix to watch, as written in the file (see [`expand_home`]).
+    pub prefix: Option<PathBuf>,
     pub sleep: SleepConfig,
 }
 
@@ -31,6 +38,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             schema: CURRENT_SCHEMA,
+            prefix: None,
             sleep: SleepConfig::default(),
         }
     }
@@ -44,6 +52,16 @@ pub struct SleepConfig {
     /// Off by default: a game left running through a suspend loses its
     /// connection to the server and can take ~15 minutes to notice.
     pub allow_suspend_while_playing: bool,
+}
+
+/// Replaces a leading `~` component with `home`: `~/Games` becomes
+/// `<home>/Games`. Other paths, including `~user/...`, are returned as is.
+pub fn expand_home(path: &Path, home: &Path) -> PathBuf {
+    match path.strip_prefix("~") {
+        Ok(rest) if rest.as_os_str().is_empty() => home.to_owned(),
+        Ok(rest) => home.join(rest),
+        Err(_) => path.to_owned(),
+    }
 }
 
 /// Something in the file that was ignored or may not be fully understood.
@@ -141,5 +159,30 @@ mod tests {
     fn wrong_type_is_an_error() {
         assert!(parse("[sleep]\nallow_suspend_while_playing = \"yes\"\n").is_err());
         assert!(parse("not toml at all [").is_err());
+    }
+
+    #[test]
+    fn reads_prefix() {
+        let loaded = parse("prefix = \"~/Games/battlenet\"\n").unwrap();
+        assert_eq!(
+            loaded.config.prefix,
+            Some(PathBuf::from("~/Games/battlenet"))
+        );
+        assert!(loaded.warnings.is_empty());
+    }
+
+    #[test]
+    fn expands_home() {
+        let home = Path::new("/home/user");
+        let expand = |p: &str| expand_home(Path::new(p), home);
+        assert_eq!(
+            expand("~/Games/battlenet"),
+            Path::new("/home/user/Games/battlenet")
+        );
+        assert_eq!(expand("~"), Path::new("/home/user"));
+        assert_eq!(expand("/opt/prefix"), Path::new("/opt/prefix"));
+        // Not supported: kept as is (and later rejected as relative).
+        assert_eq!(expand("~other/Games"), Path::new("~other/Games"));
+        assert_eq!(expand("Games/battlenet"), Path::new("Games/battlenet"));
     }
 }
