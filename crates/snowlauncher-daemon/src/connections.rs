@@ -6,6 +6,7 @@
 //! keeps a half-open connection: you can still walk around, but nothing
 //! reaches the server, and the game may take ~15 minutes to notice.
 
+use snowlauncher_core::dbus::GameConnection;
 use snowlauncher_core::desktop::Notifier;
 use snowlauncher_core::network::NetworkMonitor;
 use snowlauncher_core::process::Pid;
@@ -22,8 +23,9 @@ pub struct ConnectionMonitor<N, M> {
     /// Already warned about the current problem: do not repeat until the
     /// connections look normal again.
     warned: bool,
-    /// Avoids repeating the same log line every poll.
-    network_down_logged: bool,
+    /// The last poll found the local network down (also used to log
+    /// that only once).
+    network_down: bool,
     read_failing: bool,
 }
 
@@ -35,8 +37,21 @@ impl<N: NetworkMonitor, M: Notifier> ConnectionMonitor<N, M> {
             detector: DeadConnectionDetector::default(),
             tracked: Vec::new(),
             warned: false,
-            network_down_logged: false,
+            network_down: false,
             read_failing: false,
+        }
+    }
+
+    /// Current state, for the D-Bus interface.
+    pub fn state(&self) -> GameConnection {
+        if self.tracked.is_empty() {
+            GameConnection::NoGame
+        } else if self.network_down {
+            GameConnection::NetworkDown
+        } else if self.warned {
+            GameConnection::Lost
+        } else {
+            GameConnection::Ok
         }
     }
 
@@ -62,14 +77,14 @@ impl<N: NetworkMonitor, M: Notifier> ConnectionMonitor<N, M> {
         // the network is back. If the state cannot be read, assume online.
         let online = self.network.is_online().await.unwrap_or(true);
         if !online {
-            if !self.network_down_logged {
+            if !self.network_down {
                 debug!("network is down; game retransmissions do not count");
-                self.network_down_logged = true;
+                self.network_down = true;
             }
             self.detector.reset();
             return;
         }
-        self.network_down_logged = false;
+        self.network_down = false;
 
         let mut sample = Vec::new();
         for &pid in pids {
@@ -276,5 +291,24 @@ mod tests {
         assert!(monitor.notifier.0.is_empty());
         monitor.update(&sockets, &[Pid(200)], TITLES).await;
         assert_eq!(monitor.notifier.0.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn state_follows_what_happened() {
+        let sockets = FakeSockets(Mutex::new(vec![healthy(), stuck(), stuck()].into()));
+        let mut monitor = ConnectionMonitor::new(
+            ScriptedNetwork(VecDeque::from([true, false, true])),
+            RecordingNotifier::default(),
+        );
+        assert_eq!(monitor.state(), GameConnection::NoGame);
+        monitor.update(&sockets, &[WOW], TITLES).await; // healthy
+        assert_eq!(monitor.state(), GameConnection::Ok);
+        monitor.update(&sockets, &[WOW], TITLES).await; // network down
+        assert_eq!(monitor.state(), GameConnection::NetworkDown);
+        monitor.update(&sockets, &[WOW], TITLES).await; // stuck (1st)
+        monitor.update(&sockets, &[WOW], TITLES).await; // stuck (2nd): warned
+        assert_eq!(monitor.state(), GameConnection::Lost);
+        monitor.update(&sockets, &[], &[]).await; // game closed
+        assert_eq!(monitor.state(), GameConnection::NoGame);
     }
 }

@@ -15,6 +15,7 @@ use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
 
 use crate::connections::ConnectionMonitor;
+use crate::dbus::Status;
 
 /// Keeps the inhibition in sync with the set of running games.
 pub struct GameGuard<I> {
@@ -36,6 +37,11 @@ impl<I: SuspendInhibitor> GameGuard<I> {
             games: Vec::new(),
             failing: false,
         }
+    }
+
+    /// Whether automatic suspend is currently being blocked.
+    pub fn is_inhibiting(&self) -> bool {
+        self.inhibiting
     }
 
     /// Applies the current set of running games.
@@ -92,6 +98,7 @@ pub async fn watch_games<T, I, N, M>(
     prefix: &Path,
     guard: &mut GameGuard<I>,
     connections: &mut ConnectionMonitor<N, M>,
+    status: &tokio::sync::watch::Sender<Status>,
     every: Duration,
 ) -> Result<()>
 where
@@ -111,6 +118,20 @@ where
         let titles = game_titles(games);
         guard.update(titles.clone()).await;
         connections.update(system, &pids, &titles).await;
+
+        // Publish only real changes, so D-Bus clients get no noise.
+        status.send_if_modified(|current| {
+            let games: Vec<String> = titles.iter().map(|&title| title.to_owned()).collect();
+            let changed = current.running_games != games
+                || current.suspend_inhibited != guard.is_inhibiting()
+                || current.game_connection != connections.state();
+            if changed {
+                current.running_games = games;
+                current.suspend_inhibited = guard.is_inhibiting();
+                current.game_connection = connections.state();
+            }
+            changed
+        });
     }
 }
 

@@ -673,6 +673,8 @@ dependencies = [
  "snowlauncher-core",
  "snowlauncher-wine",
  "tempfile",
+ "tokio",
+ "zbus",
 ]
 
 [[package]]

@@ -18,7 +18,7 @@ directories = "6.0.0"
 futures-util = { version = "0.3.34", default-features = false }
 snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
 snowlauncher-wine = { version = "0.1.0", path = "../snowlauncher-wine" }
-tokio = { version = "1.54.1", features = ["rt", "macros", "signal", "time"] }
+tokio = { version = "1.54.1", features = ["rt", "macros", "signal", "time", "sync"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 zbus = { version = "5.13.2", default-features = false, features = ["tokio"] }
@@ -28,4 +28,4 @@ workspace = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
-tokio = { version = "1.54.1", features = ["rt", "macros", "time", "test-util"] }
+tokio = { version = "1.54.1", features = ["rt", "macros", "time", "test-util", "rt-multi-thread"] }
