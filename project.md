@@ -56,6 +56,7 @@ As ferramentas atuais (Lutris, Faugus, Heroic) são genéricas. Nenhuma é focad
 - **Não injeta código nos jogos**, não lê nem altera memória dos jogos e não automatiza gameplay.
 - **Não toca em credenciais.** O login é sempre feito na janela oficial do Battle.net.
 - **Não contorna anti-cheat.** Jogos bloqueados por anti-cheat em nível de kernel ficam marcados como "fora de alcance".
+- **Ferramentas de terceiros só por escolha do usuário.** MangoHud, GameMode e gamescope são programas que o próprio usuário instala. O Snow só os ativa pelos mecanismos padrão de cada um (variáveis de ambiente ou wrapper, como o Lutris e a Steam fazem), sempre **desligados por padrão**. O Snow em si nunca injeta código nem lê memória dos jogos.
 - **Não usa marcas da Blizzard** no nome, no ícone ou na identidade visual. O README deve trazer um aviso de que o projeto não é afiliado à Blizzard Entertainment.
 
 ### Promessa do produto
@@ -160,10 +161,10 @@ A casinha é um **prefixo Wine controlado pelo Snow Launcher**. Ela inclui:
 - **Runtime fixado**: uma versão do GE-Proton testada e fixada, com **voltar para a anterior em um clique** se uma atualização quebrar algo. O usuário pode escolher outra versão (ver "Escolha do Proton e integração com o ProtonPlus").
 - **Ajustes padrão do prefixo**:
   - Aceleração por hardware do navegador do Battle.net **desligada**.
-  - Versão do Windows correta para a loja funcionar (validar no experimento E3).
+  - **Windows 11** (`winecfg -v win11`): forte indício de que a loja do jogo depende disso (`docs/experimentos.md`, O6). Falta o teste inverso para confirmar.
   - Pasta de jogos acessada por **letra de unidade mapeada**, não por link simbólico (correção conhecida da loja).
   - **NTSYNC** quando `/dev/ntsync` existir e for acessível. Caso contrário, fsync/esync, e a GUI informa qual está ativo.
-  - **DPI/escala** ajustados ao monitor principal.
+  - **Escala da interface (DPI) automática**, para o instalador e o Battle.net virem legíveis por padrão (ver "Escala da interface").
 - **Vigia**:
   - Escuta `PrepareForSleep` do logind. Ao acordar, aguarda a rede voltar (NetworkManager) e reinicia **Battle.net e Agent** de forma limpa.
   - **Nunca encerra um jogo em execução.** Se o WoW estiver aberto ao acordar, reinicia só Battle.net e Agent, ou avisa o usuário por notificação. O comportamento é configurável.
@@ -277,6 +278,33 @@ O app Battle.net e os dados do outro launcher **não são importados**: a casinh
 - O instalador do Battle.net costuma travar ou ficar em 0% no Wine (o script do Lutris, por exemplo, pede para fechar o app na primeira tela de login).
 - O Snow Launcher trata a instalação como um processo vigiado: inicia o instalador, detecta quando terminou ou travou (arquivos criados, processo ocioso, timeout), encerra de forma limpa e reabre o Battle.net já instalado.
 - Os detalhes dependem do experimento E6.
+
+### Escala da interface (DPI)
+
+O Wine desenha tudo a **96 DPI**, sem acompanhar a escala do desktop. Num monitor 1440p com escala de 125%, o instalador e o Battle.net ficam pequenos demais (O6). Ninguém deveria precisar ajustar isso à mão.
+
+- **Padrão automático:** usar o DPI que o próprio desktop informa às aplicações X (`Xft.dpi`, que o GNOME e o KDE ajustam para a escala escolhida). Se não houver, usar 96 × a escala do monitor principal. Arredondar para os degraus do Windows (96, 120, 144, 168, 192...). Validar no E8.
+- **Aplicado ao criar a casinha, antes de rodar o instalador**, para o próprio instalador já vir legível. Gravado no registro do prefixo (`LogPixels`), com backup e reversível, como as outras ações.
+- **Opção do usuário** no `config.toml`, para quem prefere maior ou menor:
+  ```toml
+  [display]
+  ui_scale = "auto"   # ou uma porcentagem: 100, 125, 150, 200...
+  ```
+- Se a escala do desktop mudar (outro monitor), o `doctor` aponta a diferença e oferece reaplicar.
+
+### MangoHud e GameMode
+
+Opções para quem usa essas ferramentas, como o mantenedor já faz no Lutris (`gamemoderun mangohud`). **Desligadas por padrão** (ver seção 2):
+
+```toml
+[performance]
+mangohud = false   # overlay de FPS/uso nos jogos
+gamemode = false   # otimizações do Feral GameMode enquanto joga
+```
+
+- **MangoHud** via `MANGOHUD=1` no ambiente da casinha, com o Battle.net e o Agent na lista `blacklist` do MangoHud, para o overlay aparecer **só nos jogos** e não na janela do launcher. Ativar por jogo depende do E5 (o jogo herda o ambiente do Battle.net).
+- **GameMode** via `gamemoderun` ao iniciar a casinha.
+- Se a opção estiver ligada e a ferramenta não estiver instalada, o Snow avisa (`doctor`, barra de status) em vez de falhar.
 
 ### Um prefixo por jogo ou um para todos?
 
@@ -513,10 +541,10 @@ Assisted-by: Claude (Anthropic)
 |---|---|---|
 | **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda | Parcial: E4 em parte, mais as observações O1–O4 |
 | **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso de conexão perdida, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` | **Quase pronta** (ver 12.1) |
-| **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão | Não começou |
+| **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão (Windows 11, **escala automática**), opções globais de **MangoHud e GameMode** | Não começou; o E6 validou o caminho (O6) |
 | **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar", tela de progresso de inicialização com o Snow animado, configurações, notificações, portal Background | Não começou |
 | **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções | Não começou |
-| **v0.5** | Gamescope por jogo, DPI/escala, perfis isolados por jogo, escolha do Proton (pastas da Steam/ProtonPlus) com backup do prefixo | Não começou |
+| **v0.5** | Gamescope por jogo, MangoHud por jogo, perfis isolados por jogo, escolha do Proton (pastas da Steam/ProtonPlus) com backup do prefixo | Não começou |
 | **v0.6** | Exportar diagnóstico, internacionalização (pt-BR e en), ícone simbólico, polimento | Não começou |
 | **v1.0** | Estável. Avaliar COPR, AUR e repositório Flatpak próprio | Não começou |
 
@@ -549,11 +577,12 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 |---|---|---|---|
 | E1 | Desligar a aceleração por hardware do Battle.net | A interface melhora de forma perceptível? | Pendente |
 | E2 | GE-Proton recente com NTSYNC ativo | Melhora a resposta geral? `/dev/ntsync` está acessível no Fedora 45? | **Acessível e já em uso** pelo GE-Proton11-14, sem configuração (O5). Falta medir o ganho |
-| E3 | Letra de unidade em vez de link simbólico + versão do Windows | A loja do WoW volta a funcionar? Qual combinação? | Pendente |
+| E3 | Letra de unidade em vez de link simbólico + versão do Windows | A loja do WoW volta a funcionar? Qual combinação? | **Forte indício: Windows 11** faz a loja abrir; a letra de unidade não foi o fator (O6). Falta o teste inverso |
 | E4 | Script que escuta `PrepareForSleep` e reinicia o Battle.net | Resolve a reconexão? Reiniciar o Battle.net com o WoW aberto causa algum problema? | Em parte: o sinal chega e o Battle.net reconecta sozinho depois de suspensões curtas (O2). Falta suspensão longa e reiniciar com o WoW aberto |
 | E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | Pendente |
-| E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? | Pendente |
+| E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? | **Respondido** (O6): o instalador não trava (~78 s); o "Localizar jogo" reaproveitou os 49 GB; o jogo roda em `G:`; a loja abre com Windows 11. Testado com `G:` apontando para a pasta existente, sem mover |
 | E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? | Pendente |
+| E8 | DPI do Wine igual ao `Xft.dpi` do desktop (192 com GNOME a 125%) contra 144 e 96 | O Battle.net e o instalador ficam do mesmo tamanho que os outros aplicativos? Qual é o melhor padrão automático? | Pendente |
 
 ## 14 – Riscos
 
