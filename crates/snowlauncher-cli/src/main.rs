@@ -104,6 +104,17 @@ enum HouseAction {
         #[arg(long, value_name = "PATH")]
         runtime: Option<PathBuf>,
     },
+    /// Install Battle.net in the house from Blizzard's installer, verified
+    /// first, and watch the installation until Battle.net opens.
+    InstallBattlenet {
+        /// The official installer, e.g. ~/Downloads/Battle.net-Setup.exe.
+        #[arg(long, value_name = "PATH")]
+        installer: PathBuf,
+
+        /// Only check and show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Remove the house. Never deletes games.
     Remove {
         /// Only show what would be done.
@@ -162,6 +173,9 @@ fn main() -> Result<()> {
             };
             house::create(options, &config, &mut io::stdout().lock())
         }
+        Command::House {
+            action: HouseAction::InstallBattlenet { installer, dry_run },
+        } => house::install_battlenet(&installer, dry_run, &mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Remove { dry_run },
         } => house::remove(dry_run, &mut io::stdout().lock()),

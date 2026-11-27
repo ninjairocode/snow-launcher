@@ -13,10 +13,12 @@ use anyhow::{Context, Result, ensure};
 use directories::BaseDirs;
 use snowlauncher_core::config::{Config, expand_home};
 use snowlauncher_core::display::{DpiChoice, choose_dpi};
-use snowlauncher_core::house::plan_removal;
+use snowlauncher_core::house::{BATTLENET_DIR, BATTLENET_EXE, plan_removal};
 use snowlauncher_core::house::{
     Existing, HouseInputs, HouseStep, LIBRARY_DRIVE, WINDOWS_VERSION, plan_house,
 };
+use snowlauncher_core::install::{InstallLimits, InstallState, InstallWatch, Observation};
+use snowlauncher_core::process::ProcessRole;
 use snowlauncher_core::process::{ProcessTable, processes_in_prefix};
 use snowlauncher_wine::desktop::desktop_dpi;
 use snowlauncher_wine::house::{
@@ -130,6 +132,144 @@ pub fn create(options: CreateOptions, config: &Config, out: &mut impl io::Write)
         record_file.display()
     )?;
     Ok(())
+}
+
+/// How often the installer is looked at, and progress printed.
+const WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+const PRINT_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// `snowctl house install-battlenet`: runs the verified official installer
+/// in the house and watches it until Battle.net opens.
+pub fn install_battlenet(installer: &Path, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    let record_file = record_path().context("could not determine the state directory")?;
+    let record = load_record(&record_file)?
+        .context("there is no house yet; create it first with `snowctl house create`")?;
+    let prefix = fs::canonicalize(&record.prefix)
+        .with_context(|| format!("the house's prefix {} is missing", record.prefix.display()))?;
+    ensure!(
+        !prefix.join(BATTLENET_EXE).exists(),
+        "Battle.net is already installed in the house ({})",
+        prefix.join(BATTLENET_EXE).display()
+    );
+    let processes = ProcfsProcessTable::new()
+        .processes()
+        .context("failed to list processes")?;
+    ensure!(
+        processes_in_prefix(&processes, &prefix).next().is_none(),
+        "programs are running in the house; close them first"
+    );
+    // Only Blizzard's installer, unmodified (project.md, section 5).
+    let report = crate::installer::check(installer)?;
+    let umu_run = find_umu_run()
+        .context("umu-run not found: install umu-launcher (or Lutris, which bundles it)")?;
+
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "Install Battle.net into the house{mode}\n")?;
+    writeln!(out, "House:     {}", prefix.display())?;
+    out.write_all(report.as_bytes())?;
+    writeln!(
+        out,
+        "\nThe installer window will open: follow it. Snow Launcher watches until \
+         Battle.net opens (stuck after 5 minutes without progress, gives up after 30)."
+    )?;
+    if dry_run {
+        return Ok(());
+    }
+
+    let log = create_log_path().context("could not determine the state directory")?;
+    let runner = UmuRunner {
+        umu_run,
+        prefix: prefix.clone(),
+        runtime: record.runtime_path.clone(),
+        log,
+    };
+    let installer_path = fs::canonicalize(installer)
+        .with_context(|| format!("could not read {}", installer.display()))?;
+    let installer_name = installer_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // Not waited for: it keeps running with Battle.net after we are done.
+    let _child = runner
+        .spawn(&[installer_path.as_os_str()])
+        .context("could not start the installer")?;
+
+    writeln!(out)?;
+    let started = std::time::Instant::now();
+    let mut watch = InstallWatch::new(InstallLimits::default());
+    let mut last_print = None::<std::time::Instant>;
+    let bnet_dir = prefix.join(BATTLENET_DIR);
+    loop {
+        std::thread::sleep(WATCH_EVERY);
+        let processes = ProcfsProcessTable::new()
+            .processes()
+            .context("failed to list processes")?;
+        let ours: Vec<_> = processes_in_prefix(&processes, &prefix).collect();
+        let observation = Observation {
+            elapsed: started.elapsed(),
+            installer_running: ours
+                .iter()
+                .any(|p| p.display_name().eq_ignore_ascii_case(&installer_name)),
+            battlenet_running: ours
+                .iter()
+                .any(|p| ProcessRole::of(p) == ProcessRole::BattleNet),
+            installed_bytes: executor::dir_size(&bnet_dir),
+        };
+        let elapsed = clock(observation.elapsed);
+        match watch.observe(observation) {
+            InstallState::Installing { installed_bytes } => {
+                if last_print.is_none_or(|at| at.elapsed() >= PRINT_EVERY) {
+                    writeln!(
+                        out,
+                        "  {elapsed}  installing… {} MB",
+                        installed_bytes / 1_000_000
+                    )?;
+                    out.flush()?;
+                    last_print = Some(std::time::Instant::now());
+                }
+            }
+            InstallState::Done => {
+                writeln!(
+                    out,
+                    "  {elapsed}  Battle.net is installed and open.\n\n\
+                     Log in, then use \"Locate the game\" for games already in the \
+                     library (G:)."
+                )?;
+                return Ok(());
+            }
+            InstallState::Stalled => bail_left_open(
+                elapsed,
+                "the installer made no progress for 5 minutes and seems stuck",
+            )?,
+            InstallState::ExitedWithoutBattlenet => {
+                bail_left_open(elapsed, "the installer closed but Battle.net did not open")?
+            }
+            InstallState::TimedOut => {
+                bail_left_open(elapsed, "the installation took more than 30 minutes")?;
+            }
+        }
+    }
+}
+
+/// Stops with an explanation, leaving whatever is open for the user to see.
+fn bail_left_open(elapsed: String, what: &str) -> Result<()> {
+    let log = create_log_path()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    anyhow::bail!(
+        "{elapsed}  {what}. Nothing was closed: check the installer window, \
+         close it if needed and run this command again (Wine log: {log})."
+    )
+}
+
+/// `78 s` → `1:18`.
+fn clock(elapsed: std::time::Duration) -> String {
+    let secs = elapsed.as_secs();
+    format!("{}:{:02}", secs / 60, secs % 60)
 }
 
 /// Guards before changing anything. Returns the umu-run to use.
@@ -359,6 +499,12 @@ mod tests {
         assert!(check_can_create(root, root, umu, false, record).is_err());
         let no_umu = check_can_create(&inside, root, None, false, record).unwrap_err();
         assert!(no_umu.to_string().contains("umu-run not found"));
+    }
+
+    #[test]
+    fn clock_is_minutes_and_seconds() {
+        assert_eq!(clock(std::time::Duration::from_secs(78)), "1:18");
+        assert_eq!(clock(std::time::Duration::from_secs(5)), "0:05");
     }
 
     #[test]

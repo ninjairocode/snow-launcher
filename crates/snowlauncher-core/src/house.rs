@@ -17,6 +17,20 @@ use crate::display::DpiChoice;
 /// Organization in the certificate that signs the Battle.net installer.
 pub const BATTLENET_PUBLISHER: &str = "Blizzard Entertainment, Inc.";
 
+/// Environment for everything run in the house.
+///
+/// `QT_ENABLE_HIGHDPI_SCALING=0`: the Battle.net installer and the login
+/// window are Qt 5.15 windows. Above 100% DPI, Qt turns on its own high-DPI
+/// scaling mode, which under Wine freezes the installer and crashes the
+/// password step of the login (access violation in Qt5Core, experiment
+/// E11). With that mode off, Qt still sizes text and widgets from Wine's
+/// DPI, so everything works and stays readable at 192 DPI.
+pub const HOUSE_ENV: &[(&str, &str)] = &[("QT_ENABLE_HIGHDPI_SCALING", "0")];
+
+/// Where the installer puts the Battle.net app, relative to the prefix.
+pub const BATTLENET_DIR: &str = "drive_c/Program Files (x86)/Battle.net";
+pub const BATTLENET_EXE: &str = "drive_c/Program Files (x86)/Battle.net/Battle.net.exe";
+
 /// Windows version the prefix reports (`winecfg -v`).
 pub const WINDOWS_VERSION: &str = "win11";
 /// Drive letter of the game library inside the prefix.
