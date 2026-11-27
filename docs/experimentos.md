@@ -200,3 +200,37 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 - [ ] O instalador com 192.
 - [ ] Se o DPI afeta algo dentro do WoW.
 - [ ] Outras escalas e ambientes (GNOME 100%/150%/200%, KDE nos dois modos, sessão X11, vários monitores): pedir relatos de usuários.
+
+## O8 – Controle do Battle.net por fora (E5, E9, E10)
+
+**Data:** 2026-11-27
+**Ambiente:** prefixo de teste do O6 (Windows 11, DPI 192), Battle.net 2.53.8, GE-Proton11-14. Comandos auxiliares rodados no mesmo prefixo com `PROTON_VERB=runinprefix`, senão o Proton espera o prefixo inteiro terminar.
+
+### E10: etapas da inicialização e fechamento
+
+1. **Marcas de etapa no log do cliente** (sessão com login automático):
+
+   | Tempo | Marca | Etapa |
+   |---|---|---|
+   | 0 s | `[Main] Logging started for Battle.net build …` | iniciando |
+   | +2,9 s | `[Agent] AgentManager is now initialized` | Agent pronto |
+   | +5,5 s | `[LoginController] Login_QueueUpdate …` | login em andamento |
+   | +5,7 s | `[GSAccountProvider] Login triggered.` | login em andamento |
+   | +6,2 s | `[GSStateTracker] State changed to: Ready` | **pronto** |
+   | +6,3 s | `[BNLogin] Logged into Battle.net successfully.` | **pronto** |
+
+   "Aguardando login" (sem sessão salva) não foi observado: fica como "iniciou e não chegou a `Ready` em N segundos", como a seção 5 já previa. O `BLZBNTBNA00000005` do O4 é registrado no mesmo instante do `Ready`.
+2. **Fechar por fora:** `taskkill /im Battle.net.exe` **sem `/f`** (pedido normal de fechar) fechou o Battle.net **de verdade**, em ~1 s, com desmontagem ordenada no log (`Destroying ObserverRecord …`). O Agent saiu sozinho ~10 s depois (`No Connected Clients detected: Shutting Down`, `Agent is shutting down`). Prefixo vazio, sem `wineserver -k` nem sinais.
+
+### E9: bandeja e reabrir a janela
+
+1. O "X" da janela do Battle.net **só esconde na bandeja**; o processo continua.
+2. Rodar o `Battle.net.exe` **de novo** com ele na bandeja: a segunda execução terminou em ~1 s, **sem criar outra instância** (mesmo PID principal), e **a janela voltou** à tela.
+3. Ainda não foi testado como **esconder o ícone do Battle.net** na bandeja. A condição de segurança (o Snow conseguir trazer a janela de volta) está validada.
+
+### E5: abrir o jogo direto
+
+1. `Battle.net.exe --exec="launch wowf"` (o *uid* do Agent): **ignorado**, sem erro e sem nada no log.
+2. `Battle.net.exe --exec="launch WoWF"` (o **código do produto**): o `Wow.exe` subiu **4 s** depois, com a mesma linha de comando do botão "Jogar" (`G:\World of Warcraft\_forever_\Wow.exe -launcherlogin -uid wowf`), e o jogo abriu normalmente.
+3. O log do cliente liga os dois: `productCode=WoWF_wowf`. O Snow pode **descobrir o código pelo log**, sem depender só de uma lista fixa, e o catálogo de jogos guarda o código de produto **e** o *uid*.
+4. Ainda não testado: se o jogo herda o ambiente do Battle.net (variáveis do MangoHud, gamescope), a outra metade do E5.
