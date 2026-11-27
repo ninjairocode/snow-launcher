@@ -115,6 +115,13 @@ enum HouseAction {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Open Battle.net in the house (with the house's environment), or
+    /// bring its window back if it is already open, even from the tray.
+    Open {
+        /// Only show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Remove the house. Never deletes games.
     Remove {
         /// Only show what would be done.
@@ -176,6 +183,9 @@ fn main() -> Result<()> {
         Command::House {
             action: HouseAction::InstallBattlenet { installer, dry_run },
         } => house::install_battlenet(&installer, dry_run, &mut io::stdout().lock()),
+        Command::House {
+            action: HouseAction::Open { dry_run },
+        } => house::open(dry_run, &mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Remove { dry_run },
         } => house::remove(dry_run, &mut io::stdout().lock()),

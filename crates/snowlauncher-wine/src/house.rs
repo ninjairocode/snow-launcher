@@ -66,8 +66,22 @@ impl UmuRunner {
     /// Starts a program in the house without waiting for it. Proton only
     /// returns once everything in the prefix has exited, which for an
     /// installer that opens Battle.net means "when Battle.net closes".
+    ///
+    /// It gets its own process group, so closing the terminal `snowctl`
+    /// ran in does not take Battle.net down with it.
     pub fn spawn(&self, args: &[impl AsRef<std::ffi::OsStr>]) -> io::Result<std::process::Child> {
-        self.command(args)?.spawn()
+        use std::os::unix::process::CommandExt;
+        self.command(args)?.process_group(0).spawn()
+    }
+
+    /// Runs a program alongside what is already running in the house and
+    /// waits for it (`PROTON_VERB=runinprefix`; the default verb would wait
+    /// for the whole prefix). E.g. `Battle.net.exe` again, which brings the
+    /// open window back, even from the tray (experiment E9).
+    pub fn run_alongside(&self, args: &[impl AsRef<std::ffi::OsStr>]) -> io::Result<bool> {
+        let mut command = self.command(args)?;
+        command.env("PROTON_VERB", "runinprefix");
+        Ok(command.status()?.success())
     }
 }
 
@@ -325,6 +339,11 @@ pub fn record_path() -> Option<PathBuf> {
 /// Log of the Wine tools' output during create.
 pub fn create_log_path() -> Option<PathBuf> {
     record_path().map(|path| path.with_file_name("house-create.log"))
+}
+
+/// Log of Battle.net's Wine output when opened by Snow Launcher.
+pub fn open_log_path() -> Option<PathBuf> {
+    record_path().map(|path| path.with_file_name("house-battlenet.log"))
 }
 
 pub fn load_record(path: &Path) -> Result<Option<HouseRecord>, HouseError> {

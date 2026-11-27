@@ -22,7 +22,8 @@ use snowlauncher_core::process::ProcessRole;
 use snowlauncher_core::process::{ProcessTable, processes_in_prefix};
 use snowlauncher_wine::desktop::desktop_dpi;
 use snowlauncher_wine::house::{
-    self as executor, UmuRunner, create_log_path, load_record, record_path, save_record,
+    self as executor, UmuRunner, create_log_path, load_record, open_log_path, record_path,
+    save_record,
 };
 use snowlauncher_wine::prefix::{default_prefix_path, prefixes_root};
 use snowlauncher_wine::procfs::ProcfsProcessTable;
@@ -253,6 +254,102 @@ pub fn install_battlenet(installer: &Path, dry_run: bool, out: &mut impl io::Wri
             }
         }
     }
+}
+
+/// What `house open` does, depending on the house's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenAction {
+    /// Battle.net is closed: start it.
+    Start,
+    /// Battle.net is open (maybe only in the tray): bring its window back.
+    BringBack,
+}
+
+fn open_action(installed: bool, running: bool) -> Result<OpenAction> {
+    ensure!(
+        installed,
+        "Battle.net is not installed in the house yet; use \
+         `snowctl house install-battlenet --installer PATH`"
+    );
+    Ok(if running {
+        OpenAction::BringBack
+    } else {
+        OpenAction::Start
+    })
+}
+
+/// How long to wait for Battle.net to show up after starting it.
+const START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// `snowctl house open`: opens Battle.net in the house, with the house's
+/// environment (the Qt fix, E11), or brings its window back.
+pub fn open(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    let record_file = record_path().context("could not determine the state directory")?;
+    let record = load_record(&record_file)?
+        .context("there is no house yet; create it first with `snowctl house create`")?;
+    let prefix = fs::canonicalize(&record.prefix)
+        .with_context(|| format!("the house's prefix {} is missing", record.prefix.display()))?;
+    let exe = prefix.join(BATTLENET_EXE);
+    let battlenet_pid = || -> Result<Option<u32>> {
+        let processes = ProcfsProcessTable::new()
+            .processes()
+            .context("failed to list processes")?;
+        Ok(processes_in_prefix(&processes, &prefix)
+            .find(|p| ProcessRole::of(p) == ProcessRole::BattleNet)
+            .map(|p| p.pid.0))
+    };
+    let action = open_action(exe.is_file(), battlenet_pid()?.is_some())?;
+
+    let what = match action {
+        OpenAction::Start => "start Battle.net",
+        OpenAction::BringBack => "Battle.net is already open: bring its window back",
+    };
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "Open Battle.net in the house{mode}")?;
+    writeln!(out, "  {what}")?;
+    if dry_run {
+        return Ok(());
+    }
+
+    let runner = UmuRunner {
+        umu_run: find_umu_run()
+            .context("umu-run not found: install umu-launcher (or Lutris, which bundles it)")?,
+        prefix: prefix.clone(),
+        runtime: record.runtime_path.clone(),
+        log: open_log_path().context("could not determine the state directory")?,
+    };
+    match action {
+        OpenAction::BringBack => {
+            runner
+                .run_alongside(&[exe.as_os_str()])
+                .context("could not reach the running Battle.net")?;
+            writeln!(out, "Its window should be back on screen.")?;
+        }
+        OpenAction::Start => {
+            // Not waited for: Battle.net keeps running after we exit.
+            let _child = runner
+                .spawn(&[exe.as_os_str()])
+                .context("could not start Battle.net")?;
+            let started = std::time::Instant::now();
+            while started.elapsed() < START_TIMEOUT {
+                std::thread::sleep(WATCH_EVERY);
+                if let Some(pid) = battlenet_pid()? {
+                    writeln!(out, "Battle.net is starting (pid {pid}).")?;
+                    return Ok(());
+                }
+            }
+            anyhow::bail!(
+                "Battle.net did not show up within {} s (Wine log: {})",
+                START_TIMEOUT.as_secs(),
+                runner.log.display()
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Stops with an explanation, leaving whatever is open for the user to see.
@@ -499,6 +596,14 @@ mod tests {
         assert!(check_can_create(root, root, umu, false, record).is_err());
         let no_umu = check_can_create(&inside, root, None, false, record).unwrap_err();
         assert!(no_umu.to_string().contains("umu-run not found"));
+    }
+
+    #[test]
+    fn open_starts_or_brings_back() {
+        assert_eq!(open_action(true, false).unwrap(), OpenAction::Start);
+        assert_eq!(open_action(true, true).unwrap(), OpenAction::BringBack);
+        let error = open_action(false, false).unwrap_err().to_string();
+        assert!(error.contains("install-battlenet"), "{error}");
     }
 
     #[test]
