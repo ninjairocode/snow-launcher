@@ -250,6 +250,49 @@ pub fn game_titles<'a>(games: impl IntoIterator<Item = &'a ProcessInfo>) -> Vec<
     titles
 }
 
+/// Whether Battle.net may be closed in a prefix, from its processes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuitDecision {
+    /// Battle.net is not running there.
+    NotRunning,
+    /// A game, or a Windows program that could be one, is running: never
+    /// close Battle.net under it. Names to show the user.
+    ProgramsRunning(Vec<String>),
+    Quit,
+}
+
+/// Decides whether Battle.net may be closed in `prefix`. Cautious: any
+/// Windows program besides Battle.net itself, its helpers, the Agent and
+/// Wine's services blocks it, since an unknown program may be a game.
+pub fn quit_decision(processes: &[ProcessInfo], prefix: &Path) -> QuitDecision {
+    let mut battlenet = false;
+    let mut blocking: Vec<String> = Vec::new();
+    for process in processes_in_prefix(processes, prefix) {
+        match ProcessRole::of(process) {
+            ProcessRole::BattleNet => battlenet = true,
+            ProcessRole::Game | ProcessRole::Other => blocking.push(
+                process
+                    .game_title()
+                    .unwrap_or_else(|| process.display_name())
+                    .to_owned(),
+            ),
+            ProcessRole::BattleNetHelper
+            | ProcessRole::Agent
+            | ProcessRole::WineService
+            | ProcessRole::Launcher => {}
+        }
+    }
+    blocking.sort_unstable();
+    blocking.dedup();
+    if !blocking.is_empty() {
+        QuitDecision::ProgramsRunning(blocking)
+    } else if battlenet {
+        QuitDecision::Quit
+    } else {
+        QuitDecision::NotRunning
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,5 +491,46 @@ mod tests {
     fn relative_wineprefix_never_matches() {
         let processes = [process(1, Some("battlenet"))];
         assert!(matching_pids(&processes, "battlenet").is_empty());
+    }
+
+    fn windows(pid: u32, exe: &str) -> ProcessInfo {
+        ProcessInfo {
+            cmdline: vec![exe.to_owned()],
+            ..process(pid, Some(PREFIX))
+        }
+    }
+
+    const BATTLENET: &str = r"C:\Program Files (x86)\Battle.net\Battle.net.exe";
+
+    #[test]
+    fn quits_only_without_games_or_unknown_programs() {
+        let prefix = Path::new(PREFIX);
+        assert_eq!(quit_decision(&[], prefix), QuitDecision::NotRunning);
+
+        let battlenet = windows(1, BATTLENET);
+        assert_eq!(
+            quit_decision(std::slice::from_ref(&battlenet), prefix),
+            QuitDecision::Quit
+        );
+
+        let wow = windows(2, r"G:\World of Warcraft\_retail_\Wow.exe");
+        let other = windows(3, r"C:\Games\Unknown\Game.exe");
+        assert_eq!(
+            quit_decision(&[battlenet.clone(), wow.clone(), wow, other], prefix),
+            QuitDecision::ProgramsRunning(vec![
+                "Game.exe".to_owned(),
+                "World of Warcraft".to_owned()
+            ])
+        );
+
+        // Programs of other prefixes never count.
+        let elsewhere = ProcessInfo {
+            wineprefix: Some(PathBuf::from("/home/user/Games/battlenet")),
+            ..windows(4, r"G:\World of Warcraft\_retail_\Wow.exe")
+        };
+        assert_eq!(
+            quit_decision(&[battlenet, elsewhere], prefix),
+            QuitDecision::Quit
+        );
     }
 }

@@ -341,6 +341,49 @@ fn run_and_report(
     Ok(())
 }
 
+/// `snowctl house quit`: closes Battle.net the clean way (E10), never
+/// while a game runs in the house.
+pub fn quit(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    use snowlauncher_core::process::QuitDecision;
+    let (house, runner) = house_runner()?;
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "Close Battle.net in the house{mode}")?;
+    let outcome = if dry_run {
+        match executor::quit_check(&house.prefix)? {
+            QuitDecision::NotRunning => executor::QuitOutcome::NotRunning,
+            QuitDecision::ProgramsRunning(names) => executor::QuitOutcome::ProgramsRunning(names),
+            QuitDecision::Quit => {
+                writeln!(out, "  ask Battle.net to close (taskkill without /f)")?;
+                writeln!(
+                    out,
+                    "  wait up to {} s for it to close",
+                    executor::QUIT_TIMEOUT.as_secs()
+                )?;
+                return Ok(());
+            }
+        }
+    } else {
+        executor::quit_battlenet(&runner)?
+    };
+    match outcome {
+        executor::QuitOutcome::NotRunning => writeln!(out, "Battle.net is not running.")?,
+        executor::QuitOutcome::Closed => writeln!(out, "Battle.net closed.")?,
+        executor::QuitOutcome::ProgramsRunning(names) => anyhow::bail!(
+            "not closing Battle.net while {} runs in the house; close it first",
+            names.join(", ")
+        ),
+        executor::QuitOutcome::StillOpen => anyhow::bail!(
+            "Battle.net was asked to close but is still open after {} s",
+            executor::QUIT_TIMEOUT.as_secs()
+        ),
+    }
+    Ok(())
+}
+
 /// `snowctl house open`: opens Battle.net in the house, with the house's
 /// environment (the Qt fix, E11), or brings its window back.
 pub fn open(dry_run: bool, out: &mut impl io::Write) -> Result<()> {

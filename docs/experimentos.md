@@ -344,3 +344,28 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 - KDE (StatusNotifierItem nativo) e outras versões da extensão AppIndicator.
 - Quem mostra o item: o `snowd` (sempre rodando) ou a GUI em segundo plano.
 - Como esconder o ícone do Battle.net (E9).
+
+## O13 – Fechar o Battle.net pelo Snow, e o `--exec` com ele fechado
+
+**Data:** 2026-11-27
+**Contexto:** primeiro uso do `snowctl house quit` (o fechamento limpo do E10: `taskkill /im Battle.net.exe` sem `/f`, recusado enquanto um jogo roda na casinha).
+
+### Resultados
+
+1. **Fechar com nenhum jogo aberto:**
+
+   | Tempo | O que aconteceu |
+   |---|---|
+   | +3 s | o processo principal do Battle.net saiu; o `quit` anuncia "fechado" neste ponto |
+   | ~+17 s | o Agent saiu sozinho |
+   | ~+20 s | os invólucros do lado Linux (umu-run, pressure-vessel), que levam o caminho do `Battle.net.exe` na linha de comando, terminaram |
+
+   Contar processos com "Battle.net.exe" na linha de comando engana: os invólucros aparecem na contagem.
+2. **Recusa com o WoW aberto:** o `quit` recusou ("not closing Battle.net while World of Warcraft runs"), e o jogo e o Battle.net ficaram intactos.
+3. **`--exec="launch WoWF"` com o Battle.net fechado:** o Battle.net abriu e logou em 9 s, selecionou o WoW (`Active product set to: WoW_wowf`) e **parou**. O jogo não subiu em 56 s, até o `quit` cancelar (`Game launch sequence canceled`). Com o Battle.net já aberto e logado, o mesmo pedido abriu o jogo em 7 s (como no E5).
+4. **Brecha do `quit`:** durante uma sequência de lançamento ainda não existe processo do jogo, então o `quit` fecha o Battle.net e cancela o lançamento. Nenhum jogo é fechado (a regra "nunca fechar um jogo" se mantém), mas o lançamento em andamento se perde.
+
+### Consequências
+
+- Para "Jogar" com o Battle.net fechado, abrir o Battle.net primeiro, esperar o login (as marcas do E10) e só então pedir o jogo. A causa da parada (3) fica para um experimento próprio.
+- Detectar um lançamento em andamento (pelo log) antes de fechar fica como melhoria do `quit`.

@@ -437,7 +437,7 @@ A bandeja, a tela de progresso, a reconexão ao acordar e a correção do Agent 
 | Saber em que etapa está (iniciando, aguardando login, pronto, travado) | Marcas nos logs do cliente: `Logging started` → `AgentManager is now initialized` → `Login triggered` → `State changed to: Ready` / `Logged into Battle.net successfully`. "Aguardando login" = não chegou ao `Ready` em N s | **Validado** (E10, O8) |
 | Trazer a janela de volta (inclusive da bandeja) | Rodar o `Battle.net.exe` de novo com ele já aberto: a instância existente se mostra, sem abrir outra | **Validado** (E9, O8) |
 | Abrir um jogo direto | `Battle.net.exe --exec="launch <código do produto>"`. O código é o do produto (`WoWF`), **não** o *uid* do Agent (`wowf`, que é ignorado em silêncio); o log liga os dois (`productCode=WoWF_wowf`) | **Validado** (E5, O8) |
-| Fechar de forma limpa | `taskkill /im Battle.net.exe` sem `/f`: fecha de verdade em ~1 s (diferente do "X", que só esconde na bandeja), e o Agent sai sozinho em ~10 s. `wineserver -k` e sinais ficam só como plano B (seção 9.2) | **Validado** (E10, O8) |
+| Fechar de forma limpa | `taskkill /im Battle.net.exe` sem `/f`: fecha de verdade em ~1 s (diferente do "X", que só esconde na bandeja), e o Agent sai sozinho em ~10 s. `wineserver -k` e sinais ficam só como plano B (seção 9.2) | **Validado** (E10, O8); em uso no `snowctl house quit` e na bandeja, recusado com jogo aberto (O13) |
 | Nunca fechar um jogo aberto | Checar os jogos do prefixo antes de qualquer encerramento (já existe no `snowd`) | **Base pronta** |
 
 Cada capacidade vira uma operação do `snowd` exposta no D-Bus (hoje a interface só tem propriedades de leitura), com `--dry-run` no `snowctl`, e só entra em uso automático depois de validada.
