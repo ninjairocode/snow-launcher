@@ -17,8 +17,6 @@ clap = { version = "4.6.10", features = ["derive"] }
 directories = "6.0.0"
 snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
 snowlauncher-wine = { version = "0.1.0", path = "../snowlauncher-wine" }
-tokio = { version = "1.54.1", features = ["rt"] }
-zbus = { version = "5.13.2", default-features = false, features = ["tokio"] }
 
 [lints]
 workspace = true

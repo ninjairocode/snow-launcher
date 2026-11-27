@@ -2,6 +2,7 @@
 
 pub mod battlenet_logs;
 pub mod config_file;
+pub mod daemon_client;
 pub mod desktop;
 pub mod house;
 pub mod instance;

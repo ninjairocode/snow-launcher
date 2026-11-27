@@ -20,8 +20,10 @@ sha2 = "0.10"
 snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
 spki = "0.7"
 thiserror = "2"
+tokio = { version = "1.54.1", features = ["rt"] }
 toml = "1.2.3"
 x509-cert = { version = "0.2", features = ["pem"] }
+zbus = { version = "5.13.2", default-features = false, features = ["tokio"] }
 
 [lints]
 workspace = true
