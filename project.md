@@ -78,8 +78,14 @@ O Snow Launcher **não** promete que o Battle.net roda mais rápido que num Lutr
 | Onde ficam os jogos | Na **biblioteca**, fora do prefixo, mapeada como `G:`. Importar sempre **move** o jogo para a biblioteca |
 | Transparência | "Projeto Assistido por IA" no README + trailer `Assisted-by:` |
 | Commits | Feitos manualmente pelo mantenedor, com orientação do Claude |
-| Licença (sugerida) | **GPL-3.0-or-later**, a mesma família do umu-launcher, comum no ecossistema GNOME |
-| App ID (sugerido) | `io.github.ninjairocode.SnowLauncher` (ajustar para o usuário/organização real do GitHub) |
+| Licença | **GPL-3.0-or-later**, a mesma família do umu-launcher, comum no ecossistema GNOME (arquivo `LICENSE`) |
+| App ID | `io.github.ninjairocode.SnowLauncher` |
+| Versão mínima do Rust (MSRV) | **1.85** (edition 2024), verificada no CI. Subir quando uma dependência exigir |
+| Configuração | `~/.config/snow-launcher/config.toml`, `schema = 1`. Chaves: `prefix` e `[sleep] allow_suspend_while_playing`. Erros no arquivo viram avisos, nunca param o daemon |
+| Suspensão com jogo aberto | **Bloqueada por padrão** (portal Inhibit, só a flag *Suspend*); liberável no `config.toml`. Ver seção 5 |
+| Interface D-Bus | Barramento de **sessão**, só **propriedades de leitura** por enquanto (seção 4) |
+| Notificações | `org.freedesktop.Notifications` direto (funciona fora de sandbox: AppImage, RPM). O Flatpak vai precisar do portal de notificações |
+| Fluxo de trabalho | Tudo por PR, com CI verde; merge por *Rebase and merge*; `main` protegido (ruleset `protect-main`) |
 
 **Pendência:** verificar se o nome "Snow Launcher" já é usado por algum app Linux, no GitHub ou no Flathub antes do primeiro release.
 
@@ -93,22 +99,22 @@ O Snow Launcher **não** promete que o Battle.net roda mais rápido que num Lutr
 snow-launcher/
 ├── Cargo.toml                 # workspace
 ├── crates/
-│   ├── snowlauncher-core/           # domínio: tipos, quirks, catálogo de erros, regras. Sem IO direto.
-│   ├── snowlauncher-wine/           # prefixo, runtime (umu/GE-Proton), registro, processos Wine
-│   ├── snowlauncher-daemon/         # binário `snowd`: vigia, sleep-hook, aplicador de correções
-│   ├── snowlauncher-cli/            # binário `snowctl`: status, doctor, launch, quirks (útil p/ debug e testes)
-│   └── snowlauncher-gui/            # binário `snow-launcher`: Relm4 + libadwaita
+│   ├── snowlauncher-core/           # domínio: tipos, config, catálogo de erros, regras, nomes do D-Bus. Sem IO direto.
+│   ├── snowlauncher-wine/           # prefixo, processos (/proc), logs do Battle.net, config.toml em disco, instância única
+│   ├── snowlauncher-daemon/         # binário `snowd`: vigia, sleep-hook, inibição de suspensão, conexões, D-Bus
+│   ├── snowlauncher-cli/            # binário `snowctl`: status, doctor, service (depois: launch, quirks)
+│   └── snowlauncher-gui/            # binário `snow-launcher`: Relm4 + libadwaita (v0.3, ainda não existe)
 ├── quirks/                    # correções embutidas (fallback offline)
-├── data/                      # ícones, .desktop, metainfo.xml, unidade systemd
+├── data/                      # ícones, unidade systemd (depois: .desktop, metainfo.xml)
 ├── docs/
 └── tests/                     # testes de integração
 ```
 
 ### Comunicação entre as partes
 
-- O `snowd` expõe uma interface **D-Bus na sessão do usuário** (`io.github.ninjairocode.SnowLauncher1`), usando `zbus`.
+- O `snowd` expõe uma interface **D-Bus na sessão do usuário** (`io.github.ninjairocode.SnowLauncher1`), usando `zbus`. Hoje ela tem só propriedades de leitura, com `PropertiesChanged` a cada mudança: `Version`, `Prefix`, `RunningGames`, `SuspendInhibited` e `GameConnection` (`no-game`, `ok`, `network-down`, `lost`). Os nomes ficam em `snowlauncher_core::dbus`.
 - A GUI e a CLI são **clientes** desse D-Bus. Não duplicam lógica.
-- O `snowd` roda como **serviço do usuário** (`systemd --user`), com opção de rodar só enquanto a GUI estiver aberta.
+- O `snowd` roda como **serviço do usuário** (`systemd --user`), instalado por `snowctl service install` (com `--dry-run`, backup e `uninstall`). Sobe com a sessão gráfica e desiste depois de 3 falhas em 10 minutos. Só pode haver um `snowd` por usuário (flock em `$XDG_RUNTIME_DIR/snow-launcher.lock`).
 
 ### Fluxo principal
 
@@ -393,7 +399,7 @@ O `doctor` lê os logs do Battle.net e do Wine, identifica erros conhecidos e pr
 | Loja não abre | Quirks de letra de unidade, versão do Windows e aceleração por hardware |
 | Update preso em 0% / "aguardando outra instalação" | Encerrar processos órfãos do prefixo, limpar locks, reabrir |
 
-O catálogo fica em `snowlauncher-core` e cresce também pelo repositório de quirks.
+O catálogo fica em `snowlauncher-core` (`errors.rs`), com uma **gravidade** por erro (inofensivo ou problema), e cresce também pelo repositório de quirks. O `snowctl doctor` já lê os logs do cliente (`battle.net-*.log`) e conta em quantas sessões cada código aparece; códigos fora do catálogo são listados sem explicação inventada.
 
 **Exportar diagnóstico**: gera um `.zip` com logs, versão do runtime, quirks ativos e dados do sistema. **E-mails, nomes de usuário e caminhos do home devem ser removidos** antes de gerar o arquivo.
 
@@ -438,11 +444,16 @@ O catálogo fica em `snowlauncher-core` e cresce também pelo repositório de qu
 
 ### 9.4 CI (GitHub Actions)
 
-- `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo nextest run`
-- `cargo deny` (licenças incompatíveis, dependências duplicadas, fontes não permitidas)
-- `cargo audit` (vulnerabilidades conhecidas)
+Feito (`.github/workflows/`):
+
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo nextest run` e doctests, tudo com `--locked`
+- Checagem na MSRV (1.85) além da versão estável
+- `cargo deny` (`deny.toml`): vulnerabilidades da base RustSec, licenças compatíveis com GPL-3.0, versões `*` proibidas, só crates.io. Roda em todo push/PR e **toda semana** só para vulnerabilidades, porque elas aparecem sem o código mudar. O `cargo audit` não foi adicionado: usa a mesma base RustSec
+- Testes que precisam da sessão de desktop (portal, notificações, NetworkManager, D-Bus) são `#[ignore]` e rodam à mão com `cargo test -- --ignored`
+
+Pendente:
+
 - Build do AppImage a cada tag, com checksum `SHA256SUMS` publicado
-- Teste na MSRV e na versão estável
 
 ### 9.5 Observabilidade
 
@@ -498,30 +509,51 @@ Assisted-by: Claude (Anthropic)
 
 ## 12 – Roadmap
 
-| Versão | Entrega |
-|---|---|
-| **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda |
-| **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso ao acordar, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` |
-| **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão |
-| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar", tela de progresso de inicialização com o Snow animado, configurações, notificações, portal Background |
-| **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções |
-| **v0.5** | Gamescope por jogo, DPI/escala, perfis isolados por jogo, escolha do Proton (pastas da Steam/ProtonPlus) com backup do prefixo |
-| **v0.6** | Exportar diagnóstico, internacionalização (pt-BR e en), ícone simbólico, polimento |
-| **v1.0** | Estável. Avaliar COPR, AUR e repositório Flatpak próprio |
+| Versão | Entrega | Estado |
+|---|---|---|
+| **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda | Parcial: E4 em parte, mais as observações O1–O4 |
+| **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso de conexão perdida, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` | **Quase pronta** (ver 12.1) |
+| **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão | Não começou |
+| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar", tela de progresso de inicialização com o Snow animado, configurações, notificações, portal Background | Não começou |
+| **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções | Não começou |
+| **v0.5** | Gamescope por jogo, DPI/escala, perfis isolados por jogo, escolha do Proton (pastas da Steam/ProtonPlus) com backup do prefixo | Não começou |
+| **v0.6** | Exportar diagnóstico, internacionalização (pt-BR e en), ícone simbólico, polimento | Não começou |
+| **v1.0** | Estável. Avaliar COPR, AUR e repositório Flatpak próprio | Não começou |
+
+### 12.1 Estado da v0.1 (2026-11-27)
+
+**Pronto:**
+
+- Identificação dos processos do prefixo por `WINEPREFIX` (canonicalizado, por causa do link `pfx` do umu/Proton) e pela linha de comando, não pelo `comm`, que o Chromium do Battle.net renomeia
+- Sleep-hook (logind) e espera pela rede (NetworkManager)
+- Sem suspensão automática com jogo aberto, liberável no `config.toml`
+- **Vigilância das conexões do jogo durante toda a sessão:** depois de uma queda longa (suspensão, cabo, roteador), o servidor encerra a sessão e o jogo fica com uma conexão "meio aberta" por ~15 minutos. O `snowd` detecta isso em `/proc/<pid>/net/tcp`, sem root, e avisa uma vez. Retransmissões com a rede local fora não contam. Ficou maior do que o planejado, e veio dos testes reais (`docs/experimentos.md`, O3)
+- `config.toml` com `prefix`, compartilhado pelo `snowd` e pelo `snowctl`
+- `snowctl status`, `snowctl doctor` (logs do Battle.net e catálogo de erros) e `snowctl service install|uninstall`
+- Instância única do `snowd`, serviço `systemd --user`, interface D-Bus de leitura
+- CI completo (seção 9.4)
+
+**Pendente, e por quê:**
+
+- **Reiniciar Battle.net e Agent ao acordar:** nos testes, o Battle.net se reconectou sozinho depois de suspensões curtas (O2). Implementar só quando o uso real mostrar o problema; os logs do serviço ficam no journal para isso
+- **Correção automática do `BLZBNTBNA00000005`:** o código aparece em toda inicialização sem afetar nada (O4). A correção só deve agir com sintoma visível (seção 8)
+- Encerramento gradual de processos (`wineserver -k`, SIGTERM, SIGKILL), pré-requisito das duas acima
 
 ## 13 – Experimentos a validar antes de codar
 
 Os experimentos (E) são testes manuais que confirmam se as premissas valem. Registrar os resultados em `docs/experimentos.md`.
 
-| # | Experimento | Pergunta |
-|---|---|---|
-| E1 | Desligar a aceleração por hardware do Battle.net | A interface melhora de forma perceptível? |
-| E2 | GE-Proton recente com NTSYNC ativo | Melhora a resposta geral? `/dev/ntsync` está acessível no Fedora 45? |
-| E3 | Letra de unidade em vez de link simbólico + versão do Windows | A loja do WoW volta a funcionar? Qual combinação? |
-| E4 | Script que escuta `PrepareForSleep` e reinicia o Battle.net | Resolve a reconexão? Reiniciar o Battle.net com o WoW aberto causa algum problema? |
-| E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? |
-| E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? |
-| E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? |
+Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra observações que surgiram no caminho (O1–O4): processos do Battle.net sob o Proton, sinais de suspensão, conexões meio abertas do WoW e o erro do Agent.
+
+| # | Experimento | Pergunta | Estado |
+|---|---|---|---|
+| E1 | Desligar a aceleração por hardware do Battle.net | A interface melhora de forma perceptível? | Pendente |
+| E2 | GE-Proton recente com NTSYNC ativo | Melhora a resposta geral? `/dev/ntsync` está acessível no Fedora 45? | Pendente |
+| E3 | Letra de unidade em vez de link simbólico + versão do Windows | A loja do WoW volta a funcionar? Qual combinação? | Pendente |
+| E4 | Script que escuta `PrepareForSleep` e reinicia o Battle.net | Resolve a reconexão? Reiniciar o Battle.net com o WoW aberto causa algum problema? | Em parte: o sinal chega e o Battle.net reconecta sozinho depois de suspensões curtas (O2). Falta suspensão longa e reiniciar com o WoW aberto |
+| E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | Pendente |
+| E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? | Pendente |
+| E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? | Pendente |
 
 ## 14 – Riscos
 
