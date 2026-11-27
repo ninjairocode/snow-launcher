@@ -13,7 +13,12 @@ use crate::dbus::GameConnection;
 pub enum TrayAction {
     OpenLauncher,
     OpenBattlenet,
-    Play { name: String, code: String },
+    Play {
+        name: String,
+        code: String,
+    },
+    /// Close Battle.net the clean way; never while a game runs.
+    QuitBattlenet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +52,8 @@ const OPEN_BATTLENET_ID: i32 = 3;
 const PLAY_ID: i32 = 4;
 const SEPARATOR_ID: i32 = 5;
 const NO_GAMES_ID: i32 = 6;
+const QUIT_SEPARATOR_ID: i32 = 7;
+const QUIT_ID: i32 = 8;
 /// Games are numbered from here, in the order given.
 const FIRST_GAME_ID: i32 = 100;
 
@@ -73,8 +80,14 @@ pub fn status_line(
 }
 
 /// The whole menu. Battle.net and games need a house with Battle.net
-/// installed (`house_ready`).
-pub fn tray_menu(status: &str, house_ready: bool, games: &[TrayGame]) -> Vec<MenuItem> {
+/// installed (`house_ready`); quitting Battle.net is off while a game
+/// runs (`game_running`).
+pub fn tray_menu(
+    status: &str,
+    house_ready: bool,
+    game_running: bool,
+    games: &[TrayGame],
+) -> Vec<MenuItem> {
     let item = |id, label: &str, enabled, action| MenuItem {
         id,
         label: label.to_owned(),
@@ -121,6 +134,18 @@ pub fn tray_menu(status: &str, house_ready: bool, games: &[TrayGame]) -> Vec<Men
             enabled: house_ready,
             kind: MenuKind::Submenu(play),
         },
+        MenuItem {
+            id: QUIT_SEPARATOR_ID,
+            label: String::new(),
+            enabled: true,
+            kind: MenuKind::Separator,
+        },
+        item(
+            QUIT_ID,
+            "Quit Battle.net",
+            house_ready && !game_running,
+            Some(TrayAction::QuitBattlenet),
+        ),
     ]
 }
 
@@ -180,7 +205,7 @@ mod tests {
 
     #[test]
     fn menu_with_a_playable_game() {
-        let menu = tray_menu("No game running", true, &[wow(Some("WoWF"))]);
+        let menu = tray_menu("No game running", true, false, &[wow(Some("WoWF"))]);
         let labels: Vec<&str> = menu.iter().map(|item| item.label.as_str()).collect();
         assert_eq!(
             labels,
@@ -189,9 +214,12 @@ mod tests {
                 "",
                 "Open Snow Launcher",
                 "Open Battle.net",
-                "Play"
+                "Play",
+                "",
+                "Quit Battle.net"
             ]
         );
+        assert_eq!(action_for(&menu, QUIT_ID), Some(&TrayAction::QuitBattlenet));
         assert_eq!(action_for(&menu, STATUS_ID), None);
         assert_eq!(
             action_for(&menu, OPEN_LAUNCHER_ID),
@@ -209,19 +237,28 @@ mod tests {
 
     #[test]
     fn without_a_house_only_the_launcher_opens() {
-        let menu = tray_menu("No game running", false, &[wow(Some("WoWF"))]);
+        let menu = tray_menu("No game running", false, false, &[wow(Some("WoWF"))]);
         assert!(action_for(&menu, OPEN_LAUNCHER_ID).is_some());
         assert_eq!(action_for(&menu, OPEN_BATTLENET_ID), None);
         assert_eq!(action_for(&menu, FIRST_GAME_ID), None);
     }
 
     #[test]
+    fn battlenet_cannot_be_quit_while_a_game_runs() {
+        let menu = tray_menu("World of Warcraft running", true, true, &[]);
+        assert_eq!(action_for(&menu, QUIT_ID), None);
+        assert!(action_for(&menu, OPEN_BATTLENET_ID).is_some());
+        let without_house = tray_menu("No game running", false, false, &[]);
+        assert_eq!(action_for(&without_house, QUIT_ID), None);
+    }
+
+    #[test]
     fn games_without_code_or_an_empty_library_cannot_be_played() {
-        let menu = tray_menu("", true, &[wow(None)]);
+        let menu = tray_menu("", true, false, &[wow(None)]);
         assert_eq!(action_for(&menu, FIRST_GAME_ID), None);
         assert!(!find(&menu, FIRST_GAME_ID).unwrap().enabled);
 
-        let menu = tray_menu("", true, &[]);
+        let menu = tray_menu("", true, false, &[]);
         let empty = find(&menu, NO_GAMES_ID).unwrap();
         assert_eq!(empty.label, "No games in the library");
         assert!(!empty.enabled);

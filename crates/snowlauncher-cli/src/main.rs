@@ -135,6 +135,13 @@ enum HouseAction {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Close Battle.net in the house the clean way. Refuses while a game
+    /// runs there.
+    Quit {
+        /// Only show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Remove the house. Never deletes games.
     Remove {
         /// Only show what would be done.
@@ -201,6 +208,9 @@ fn main() -> Result<()> {
         Command::House {
             action: HouseAction::Open { dry_run },
         } => house::open(dry_run, &mut io::stdout().lock()),
+        Command::House {
+            action: HouseAction::Quit { dry_run },
+        } => house::quit(dry_run, &mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Remove { dry_run },
         } => house::remove(dry_run, &mut io::stdout().lock()),

@@ -22,7 +22,8 @@ use snowlauncher_core::tray::{
     MenuItem, MenuKind, TrayAction, TrayGame, action_for, find, status_line, tray_menu,
 };
 use snowlauncher_wine::house::{
-    launch_argument, load_record, open_house, record_path, run_battlenet, write_atomic,
+    QUIT_TIMEOUT, QuitOutcome, launch_argument, load_record, open_house, quit_battlenet,
+    record_path, run_battlenet, write_atomic,
 };
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 use tokio::sync::{mpsc, watch};
@@ -336,7 +337,12 @@ async fn serve(bus: &zbus::Connection, mut status: watch::Receiver<Status>) -> R
         .at(
             MENU_PATH,
             Menu {
-                items: tray_menu(&line, house.ready, &house.games),
+                items: tray_menu(
+                    &line,
+                    house.ready,
+                    !current.running_games.is_empty(),
+                    &house.games,
+                ),
                 revision: 1,
                 actions,
             },
@@ -431,8 +437,14 @@ async fn follow(
             changed = status.changed() => if changed.is_err() { return Ok(()) },
             _ = games_timer.tick() => house = read_house_games().await,
         }
-        let line = line_for(&status.borrow_and_update());
-        let items = tray_menu(&line, house.ready, &house.games);
+        let current = status.borrow_and_update().clone();
+        let line = line_for(&current);
+        let items = tray_menu(
+            &line,
+            house.ready,
+            !current.running_games.is_empty(),
+            &house.games,
+        );
         {
             let mut menu_ref = menu.get_mut().await;
             if menu_ref.items != items {
@@ -481,6 +493,7 @@ async fn run_actions(bus: &zbus::Connection, mut requests: mpsc::UnboundedReceiv
             TrayAction::OpenLauncher => open_launcher().await,
             TrayAction::OpenBattlenet => battlenet(Vec::new()).await,
             TrayAction::Play { code, .. } => battlenet(vec![launch_argument(code)]).await,
+            TrayAction::QuitBattlenet => quit().await,
         };
         if let Err(problem) = result {
             warn!(?action, %problem, "tray action failed");
@@ -530,6 +543,32 @@ async fn battlenet(args: Vec<String>) -> Result<(), String> {
     .map_err(|problem: String| format!("Could not open Battle.net: {problem}"))
 }
 
+/// Closes Battle.net (E10), re-checking for games right before.
+async fn quit() -> Result<(), String> {
+    let outcome = tokio::task::spawn_blocking(|| {
+        let (_, runner) = open_house().map_err(|error| error.to_string())?;
+        quit_battlenet(&runner).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|problem| format!("Could not close Battle.net: {problem}"))?;
+    match outcome {
+        QuitOutcome::Closed => {
+            info!("Battle.net closed");
+            Ok(())
+        }
+        QuitOutcome::NotRunning => Ok(()),
+        QuitOutcome::ProgramsRunning(names) => Err(format!(
+            "Battle.net stays open while {} runs. Close it first.",
+            names.join(", ")
+        )),
+        QuitOutcome::StillOpen => Err(format!(
+            "Battle.net was asked to close but is still open after {} s.",
+            QUIT_TIMEOUT.as_secs()
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,7 +580,7 @@ mod tests {
             launch_code: Some("WoWF".to_owned()),
         }];
         let menu = Menu {
-            items: tray_menu("No game running", true, &games),
+            items: tray_menu("No game running", true, false, &games),
             revision: 1,
             actions,
         };

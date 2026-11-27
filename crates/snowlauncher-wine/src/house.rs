@@ -188,6 +188,60 @@ pub fn run_battlenet(runner: &UmuRunner, args: &[&str]) -> Result<BattlenetRun, 
     }
 }
 
+/// What [`quit_battlenet`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuitOutcome {
+    NotRunning,
+    /// Refused: these programs run in the house (games, or maybe games).
+    ProgramsRunning(Vec<String>),
+    Closed,
+    /// Asked to close, but still running after [`QUIT_TIMEOUT`].
+    StillOpen,
+}
+
+/// How long Battle.net gets to close after the request (E10: ~1 s).
+pub const QUIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Whether Battle.net may be closed in the house now (no game running).
+pub fn quit_check(prefix: &Path) -> Result<snowlauncher_core::process::QuitDecision, HouseError> {
+    use snowlauncher_core::process::{ProcessTable, quit_decision};
+    let processes = crate::procfs::ProcfsProcessTable::new()
+        .processes()
+        .map_err(|error| HouseError::Step {
+            step: "list processes".to_owned(),
+            problem: error.to_string(),
+        })?;
+    Ok(quit_decision(&processes, prefix))
+}
+
+/// Closes Battle.net the clean way validated in experiment E10: Wine's
+/// `taskkill` **without** `/f`, a normal close request, which only sees
+/// the house's own processes. Refuses while any game (or unknown program)
+/// runs in the house. Never escalates to signals: if Battle.net is still
+/// open after [`QUIT_TIMEOUT`], that is reported.
+pub fn quit_battlenet(runner: &UmuRunner) -> Result<QuitOutcome, HouseError> {
+    use snowlauncher_core::process::QuitDecision;
+    match quit_check(&runner.prefix)? {
+        QuitDecision::NotRunning => return Ok(QuitOutcome::NotRunning),
+        QuitDecision::ProgramsRunning(names) => return Ok(QuitOutcome::ProgramsRunning(names)),
+        QuitDecision::Quit => {}
+    }
+    runner
+        .run_alongside(&["taskkill", "/im", "Battle.net.exe"])
+        .map_err(|error| HouseError::Step {
+            step: "ask Battle.net to close".to_owned(),
+            problem: error.to_string(),
+        })?;
+    let started = std::time::Instant::now();
+    while started.elapsed() < QUIT_TIMEOUT {
+        if battlenet_pid(&runner.prefix)?.is_none() {
+            return Ok(QuitOutcome::Closed);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    Ok(QuitOutcome::StillOpen)
+}
+
 /// `--exec=launch <code>`, the argument that opens a game (E5).
 pub fn launch_argument(code: &str) -> String {
     format!("--exec=launch {code}")
