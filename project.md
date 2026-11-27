@@ -404,7 +404,7 @@ A tela principal da casinha tem:
 
 ### Bandeja: só o Snow
 
-O ícone que o Battle.net põe na bandeja fica **pequeno e borrado**: o Wine repassa à bandeja do desktop (no GNOME, pela extensão AppIndicator) o ícone pequeno do programa (16 ou 32 px), e a bandeja amplia. Em vez de tentar consertar isso, a bandeja passa a ter **um item só, o do Snow**, e o Battle.net sai de lá. O Snow é o ponto de entrada para o Battle.net e para os jogos.
+O ícone que o Battle.net põe na bandeja fica **pequeno e borrado**: o Battle.net nem é um item StatusNotifierItem. Pelo Wine, ele usa a bandeja antiga do X11 (XEmbed), que manda um bitmap pequeno (16 ou 32 px), e a bandeja amplia (E12, O12). Em vez de tentar consertar isso, a bandeja passa a ter **um item só, o do Snow**, e o Battle.net sai de lá. O Snow é o ponto de entrada para o Battle.net e para os jogos.
 
 - **Ícone:** a versão **simbólica** (monocromática) do ícone do Snow, no estilo dos outros ícones da barra do GNOME. A casinha colorida perde a forma em 16–22 px. Por isso o ícone simbólico sobe da v0.6 para a **v0.3**.
 - **Menu:**
@@ -421,7 +421,10 @@ O ícone que o Battle.net põe na bandeja fica **pequeno e borrado**: o Wine rep
 - **Esconder o item do Battle.net:** a condição de segurança foi **validada** no E9 (O8): com o Battle.net na bandeja, rodar o `Battle.net.exe` de novo traz a janela de volta. Falta descobrir **como** esconder o ícone dele (configuração do Battle.net ou do Wine).
 - **Quem mostra o item** (a decidir na v0.3): o `snowd`, que já roda sempre como serviço e mostraria o item desde o login, ou a GUI rodando em segundo plano.
 - Sem bandeja (GNOME sem a extensão AppIndicator), valem o portal Background e as notificações.
-- Usa StatusNotifierItem pelo D-Bus: nativo no KDE, e no GNOME com a extensão AppIndicator.
+- Usa StatusNotifierItem pelo D-Bus: nativo no KDE, e no GNOME com a extensão AppIndicator. **Validado no E12** (O12), com `zbus`, sem biblioteca extra:
+  - o ícone vai **por nome** (`IconName`) com um `IconThemePath` próprio, e o SVG fica **solto na raiz** desse caminho. Numa estrutura `hicolor/…` sem `index.theme`, a extensão mostra três pontinhos. Assim o ícone é vetor e fica nítido a 192 DPI;
+  - o menu é um `com.canonical.dbusmenu`, e os cliques chegam como evento `clicked`;
+  - na extensão AppIndicator, o **clique esquerdo também abre o menu** (nenhum `Activate` chegou). Então tudo passa pelo menu, com "Abrir Snow Launcher" como primeiro item.
 
 ### Controle do Battle.net
 
@@ -695,6 +698,7 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 | E8 | DPI do Wine igual ao `Xft.dpi` do desktop (192 com GNOME a 125%) contra 144 e 96 | O Battle.net e o instalador ficam do mesmo tamanho que os outros aplicativos? Qual é o melhor padrão automático? | **Validado no GNOME 125%** (O7): `Xft.dpi` (192) ficou ideal. Faltam outras escalas, KDE, X11 e vários monitores |
 | E9 | Esconder o ícone do Battle.net na bandeja (Wine/Battle.net) e reabrir a janela por fora (rodar o `Battle.net.exe` de novo com ele já aberto) | Dá para esconder? A janela volta quando o Battle.net está só na bandeja? | **Janela volta: validado** (O8). Falta descobrir como esconder o ícone |
 | E11 | Instalador e login a 192 DPI com `QT_ENABLE_HIGHDPI_SCALING=0` | Por que o instalador trava e o login quebra a 192? Dá para manter 192? | **Resolvido** (O9): o modo de alta densidade do Qt 5.15 sob o Wine; desligado, tudo funciona e fica legível a 192 |
+| E12 | Item próprio na bandeja (StatusNotifierItem + dbusmenu via `zbus`) no GNOME com AppIndicator | O ícone aparece nítido a 192 DPI? O menu e os cliques funcionam? | **Validado** (O12): ícone nítido por nome com SVG solto no `IconThemePath`; menu e cliques ok; clique esquerdo abre o menu |
 | E10 | Fechar o Battle.net por fora (`taskkill` sem `/f`, depois `wineserver -k`) e mapear nos logs as etapas da inicialização | Fecha de verdade ou só vai para a bandeja? O Agent sai junto? Quais linhas de log marcam "aguardando login" e "pronto"? | **Validado** (O8): fecha de verdade, o Agent sai em ~10 s, marcas mapeadas |
 
 ## 14 – Riscos
