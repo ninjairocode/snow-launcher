@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="data/icons/io.github.ninjairocode.SnowLauncher.svg" width="128" height="128" alt="Snow, a white boxer dressed as a wizard">
+  <img src="data/icons/io.github.ninjairocode.SnowLauncher.svg" width="128" height="128" alt="Snow, a white boxer in a wizard hat, peeking out of his doghouse">
 </p>
 
 <h1 align="center">Snow Launcher</h1>
