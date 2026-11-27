@@ -21,16 +21,15 @@ mod portal;
 mod resume;
 
 use std::future::Future;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use directories::BaseDirs;
-use snowlauncher_core::config::{self, Config};
+use snowlauncher_core::config::Config;
 use snowlauncher_core::sleep::{SleepEvent, SleepMonitor};
-use snowlauncher_wine::prefix::{WinePrefix, default_prefix_path};
+use snowlauncher_wine::config_file::{choose_prefix, default_config_path, read_config};
+use snowlauncher_wine::prefix::WinePrefix;
 use snowlauncher_wine::procfs::ProcfsProcessTable;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{info, warn};
@@ -88,12 +87,9 @@ async fn main() -> Result<()> {
         }
     };
 
-    let prefix_path = args
-        .prefix
-        .or_else(default_prefix_path)
-        .context("could not determine the home directory")?;
+    let (prefix_path, source) = choose_prefix(args.prefix, &config)?;
     let prefix = WinePrefix::open(&prefix_path).context("cannot open the prefix")?;
-    info!(prefix = %prefix.path().display(), "watching prefix");
+    info!(prefix = %prefix.path().display(), %source, "watching prefix");
 
     // System bus: logind, NetworkManager. Session bus: desktop portal,
     // notifications.
@@ -139,35 +135,27 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn default_config_path() -> Option<PathBuf> {
-    BaseDirs::new().map(|dirs| dirs.config_dir().join("snow-launcher").join("config.toml"))
-}
-
 /// Reads the config file. Never fails: problems are logged and defaults
 /// are used, so a typo never stops the daemon.
 fn load_config(path: &Path) -> Config {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            info!(path = %path.display(), "no config file; using defaults");
-            return Config::default();
-        }
-        Err(error) => {
-            warn!(path = %path.display(), error = %error, "could not read config; using defaults");
-            return Config::default();
-        }
-    };
-    match config::parse(&text) {
-        Ok(loaded) => {
+    match read_config(path) {
+        Ok(Some(loaded)) => {
             for warning in &loaded.warnings {
                 warn!(path = %path.display(), "{warning}");
             }
             info!(path = %path.display(), "config loaded");
             loaded.config
         }
+        Ok(None) => {
+            info!(path = %path.display(), "no config file; using defaults");
+            Config::default()
+        }
         Err(error) => {
             let error = anyhow::Error::from(error);
-            warn!(path = %path.display(), error = format!("{error:#}"), "invalid config; using defaults");
+            warn!(
+                error = format!("{error:#}"),
+                "could not load config; using defaults"
+            );
             Config::default()
         }
     }

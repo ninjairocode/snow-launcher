@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use snowlauncher_core::config::Config;
 use snowlauncher_core::process::{ProcessInfo, ProcessRole, ProcessTable, processes_in_prefix};
-use snowlauncher_wine::prefix::{WinePrefix, default_prefix_path};
+use snowlauncher_wine::config_file::{choose_prefix, default_config_path, read_config};
+use snowlauncher_wine::prefix::WinePrefix;
 use snowlauncher_wine::procfs::ProcfsProcessTable;
 
 #[derive(Debug, Parser)]
@@ -20,6 +22,10 @@ use snowlauncher_wine::procfs::ProcfsProcessTable;
     about = "Command-line tool for Snow Launcher"
 )]
 struct Cli {
+    /// Configuration file. Defaults to ~/.config/snow-launcher/config.toml.
+    #[arg(long, value_name = "PATH", global = true)]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -28,7 +34,8 @@ struct Cli {
 enum Command {
     /// Show a Wine prefix and the processes running in it (read-only).
     Status {
-        /// Prefix to inspect. Defaults to Snow Launcher's own prefix.
+        /// Prefix to inspect. Defaults to `prefix` in the config file, then
+        /// to Snow Launcher's own prefix.
         #[arg(long, value_name = "PATH")]
         prefix: Option<PathBuf>,
     },
@@ -36,16 +43,40 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let config = load_config(cli.config);
     match cli.command {
-        Command::Status { prefix } => status(prefix),
+        Command::Status { prefix } => status(prefix, &config),
     }
 }
 
-fn status(prefix: Option<PathBuf>) -> Result<()> {
-    let path = match prefix {
-        Some(path) => path,
-        None => default_prefix_path().context("could not determine the home directory")?,
+/// Like `snowd`: problems with the config file are warnings, and the
+/// defaults are used.
+fn load_config(path: Option<PathBuf>) -> Config {
+    let Some(path) = path.or_else(default_config_path) else {
+        return Config::default();
     };
+    match read_config(&path) {
+        Ok(Some(loaded)) => {
+            for warning in &loaded.warnings {
+                warn(&format!("{}: {warning}", path.display()));
+            }
+            loaded.config
+        }
+        Ok(None) => Config::default(),
+        Err(error) => {
+            warn(&format!("{:#}; using defaults", anyhow::Error::from(error)));
+            Config::default()
+        }
+    }
+}
+
+fn warn(message: &str) {
+    // Nothing useful to do if stderr itself is gone.
+    let _ = writeln!(io::stderr(), "warning: {message}");
+}
+
+fn status(prefix: Option<PathBuf>, config: &Config) -> Result<()> {
+    let (path, _source) = choose_prefix(prefix, config)?;
     let prefix = WinePrefix::open(&path).context("cannot open the prefix")?;
     let processes = ProcfsProcessTable::new()
         .processes()
