@@ -3,6 +3,7 @@
 //! For now it calls the libraries directly. Once `snowd` exposes its D-Bus
 //! interface, commands that depend on daemon state will go through it.
 
+mod doctor;
 mod service;
 
 use std::fmt::Write as _;
@@ -12,8 +13,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use directories::BaseDirs;
+use snowlauncher_core::battlenet_log::error_sightings;
 use snowlauncher_core::config::Config;
 use snowlauncher_core::process::{ProcessInfo, ProcessRole, ProcessTable, processes_in_prefix};
+use snowlauncher_wine::battlenet_logs::{client_logs, session_start};
 use snowlauncher_wine::config_file::{choose_prefix, default_config_path, read_config};
 use snowlauncher_wine::instance::{default_lock_path, running_instance};
 use snowlauncher_wine::prefix::WinePrefix;
@@ -42,6 +45,18 @@ enum Command {
         /// to Snow Launcher's own prefix.
         #[arg(long, value_name = "PATH")]
         prefix: Option<PathBuf>,
+    },
+
+    /// Look for known problems in a prefix (read-only).
+    Doctor {
+        /// Prefix to check. Defaults to `prefix` in the config file, then
+        /// to Snow Launcher's own prefix.
+        #[arg(long, value_name = "PATH")]
+        prefix: Option<PathBuf>,
+
+        /// How many recent Battle.net sessions to check.
+        #[arg(long, value_name = "N", default_value_t = 5)]
+        sessions: usize,
     },
 
     /// Run snowd as a systemd user service, started with the desktop.
@@ -76,8 +91,46 @@ fn main() -> Result<()> {
     let config = load_config(cli.config);
     match cli.command {
         Command::Status { prefix } => status(prefix, &config),
+        Command::Doctor { prefix, sessions } => doctor_command(prefix, sessions, &config),
         Command::Service { action } => service_command(action),
     }
+}
+
+fn doctor_command(prefix: Option<PathBuf>, sessions: usize, config: &Config) -> Result<()> {
+    use service::Systemd as _;
+
+    let (path, _source) = choose_prefix(prefix, config)?;
+    let prefix = WinePrefix::open(&path).context("cannot open the prefix")?;
+    let service_active = service::Systemctl.is_active(service::UNIT_NAME).ok();
+
+    let logs: Vec<PathBuf> = client_logs(&prefix)
+        .context("could not list the Battle.net logs")?
+        .into_iter()
+        .take(sessions)
+        .collect();
+    let mut per_session = Vec::new();
+    for log in &logs {
+        let bytes =
+            std::fs::read(log).with_context(|| format!("could not read {}", log.display()))?;
+        per_session.push(error_sightings(&String::from_utf8_lossy(&bytes)));
+    }
+    // `logs` is newest first.
+    let period = match (logs.last(), logs.first()) {
+        (Some(oldest), Some(newest)) => session_start(oldest).zip(session_start(newest)),
+        _ => None,
+    };
+
+    let report = doctor::Report {
+        prefix: prefix.path().to_owned(),
+        service_active,
+        sessions_checked: logs.len(),
+        period,
+        errors: doctor::summarize(&per_session),
+    };
+    io::stdout()
+        .lock()
+        .write_all(doctor::render(&report).as_bytes())
+        .context("failed to write to stdout")
 }
 
 fn service_command(action: ServiceAction) -> Result<()> {
