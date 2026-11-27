@@ -32,6 +32,16 @@ pub struct ErrorSighting {
     pub timestamp: Option<String>,
 }
 
+/// What a second `Battle.net.exe` logs when it hands its arguments (open
+/// the window, `--exec=launch …`) to the running one and exits.
+const HANDOFF_MARKER: &str = "Leaving because another instance of battle.net is running";
+
+/// Whether a log is from such a hand-off run, not a real session. Every
+/// "Open Battle.net" or "Play" while Battle.net is open leaves one.
+pub fn is_handoff(log: &str) -> bool {
+    log.contains(HANDOFF_MARKER)
+}
+
 /// Every error code in a log, in order. A code repeated on the same line
 /// counts once.
 pub fn error_sightings(log: &str) -> Vec<ErrorSighting> {
@@ -71,6 +81,18 @@ fn line_timestamp(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_handoff_runs() {
+        // Real lines from a hand-off log (`--exec=launch WoWF`).
+        let handoff = "I 2026-11-27 22:04:27.467932 [Main] {Main} Command line arguments: {[0]=--exec=launch WoWF}\n\
+I 2026-11-27 22:04:27.468432 [Main] {Main} Leaving because another instance of battle.net is running\n\
+D 2026-11-27 22:04:27.468496 [Main] {Main} Shutting down callback queue\n";
+        assert!(is_handoff(handoff));
+        let session =
+            "I 2026-11-27 20:58:34.353143 [Agent] {Main} AgentManager is now initialized\n";
+        assert!(!is_handoff(session));
+    }
 
     // Real line from a Battle.net log under GE-Proton (URL trimmed).
     const AGENT_LINE: &str = "D 2026-11-27 01:02:42.881873 [UrlManager] {Main} Resolved URL: key=/client/error/BLZBNTBNA00000005; region=US; endpoint=https://example.invalid/BLZBNTBNA00000005";

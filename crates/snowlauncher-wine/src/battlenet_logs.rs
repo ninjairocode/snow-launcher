@@ -4,18 +4,28 @@
 //! one `battle.net-<YYYYMMDDTHHMMSS.micros>.log` per start of the app.
 //! Proton prefixes link `users/<you>` to `users/steamuser`, so the same
 //! folder is reachable twice; it is only counted once.
+//!
+//! A second `Battle.net.exe` that only hands its request to the running
+//! one (open the window, launch a game) also leaves a tiny log; those are
+//! not sessions and are skipped.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use snowlauncher_core::battlenet_log::is_handoff;
+
 use crate::prefix::WinePrefix;
 
 const LOG_PREFIX: &str = "battle.net-";
 const LOG_SUFFIX: &str = ".log";
+/// Hand-off logs are ~1.5 KiB; real sessions are far bigger, so only
+/// small logs are read to check.
+const HANDOFF_MAX_BYTES: u64 = 16 * 1024;
 
-/// Client log files of the prefix, newest first.
+/// Client session logs of the prefix, newest first (hand-off runs
+/// excluded).
 pub fn client_logs(prefix: &WinePrefix) -> io::Result<Vec<PathBuf>> {
     client_logs_in(prefix.path())
 }
@@ -42,7 +52,7 @@ fn client_logs_in(prefix: &Path) -> io::Result<Vec<PathBuf>> {
             let is_client_log = name
                 .to_str()
                 .is_some_and(|name| name.starts_with(LOG_PREFIX) && name.ends_with(LOG_SUFFIX));
-            if is_client_log {
+            if is_client_log && !is_handoff_log(&entry.path()) {
                 logs.push(entry.path());
             }
         }
@@ -50,6 +60,11 @@ fn client_logs_in(prefix: &Path) -> io::Result<Vec<PathBuf>> {
     // The timestamp in the name sorts chronologically as text.
     logs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     Ok(logs)
+}
+
+fn is_handoff_log(path: &Path) -> bool {
+    let small = fs::metadata(path).is_ok_and(|meta| meta.len() <= HANDOFF_MAX_BYTES);
+    small && fs::read(path).is_ok_and(|bytes| is_handoff(&String::from_utf8_lossy(&bytes)))
 }
 
 /// Start time of a session from its log name:
@@ -95,6 +110,12 @@ mod tests {
         ] {
             fs::write(logs.join(name), "").unwrap();
         }
+        // A newer hand-off run: not a session.
+        fs::write(
+            logs.join("battle.net-20261127T220427.464717.log"),
+            "I 2026-11-27 22:04:27.468432 [Main] {Main} Leaving because another instance of battle.net is running\n",
+        )
+        .unwrap();
 
         let found: Vec<String> = client_logs_in(tmp.path())
             .unwrap()
