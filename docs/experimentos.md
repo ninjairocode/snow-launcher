@@ -145,8 +145,8 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 
 ### Em aberto
 
-- [ ] E1: desligar "aceleração por hardware do navegador" nas configurações do Battle.net e comparar a fluidez da interface.
-- [ ] E3: a loja dentro do WoW funciona hoje, com o jogo em `C:` e sem `G:`?
+- [ ] E1: desligar "aceleração por hardware do navegador" nas configurações do Battle.net e comparar a fluidez da interface. **Primeira impressão (2026-11-27): sem diferença clara.** Precisa de mais uso, ou de uma medida objetiva, antes de virar ajuste padrão.
+- [ ] E3: a loja dentro do WoW funciona hoje, com o jogo em `C:` e sem `G:`? **Ultimamente abre dentro do jogo**, mas o comportamento varia; acompanhar no dia a dia antes de concluir que a correção da letra de unidade é desnecessária.
 
 ## O6 – E6: casinha via umu, WoW em `G:` e a loja
 
@@ -234,3 +234,64 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 2. `Battle.net.exe --exec="launch WoWF"` (o **código do produto**): o `Wow.exe` subiu **4 s** depois, com a mesma linha de comando do botão "Jogar" (`G:\World of Warcraft\_forever_\Wow.exe -launcherlogin -uid wowf`), e o jogo abriu normalmente.
 3. O log do cliente liga os dois: `productCode=WoWF_wowf`. O Snow pode **descobrir o código pelo log**, sem depender só de uma lista fixa, e o catálogo de jogos guarda o código de produto **e** o *uid*.
 4. Ainda não testado: se o jogo herda o ambiente do Battle.net (variáveis do MangoHud, gamescope), a outra metade do E5.
+
+## O9 – A casinha de verdade, a cópia por reflink e o Qt a 192 DPI (E11)
+
+**Data:** 2026-11-27
+**Ambiente:** Fedora 45, GNOME Wayland a 125% (`Xft.dpi = 192`), GE-Proton11-14, `/home` em btrfs (LUKS).
+
+### Criação e importação
+
+1. `snowctl house create` criou a casinha em `~/.local/share/snow-launcher/prefixes/battlenet` em **13 s**: prefixo, Windows 11, DPI 192 nas três chaves e `G:` apontando para `~/Games/SnowLauncher`, com cada passo verificado no registro.
+2. **Importação por reflink:** com o Lutris fechado, `cp -a --reflink=always` copiou o WoW (**49,6 GB, 4.942 arquivos**) para a biblioteca em **1 s**. A comparação arquivo a arquivo (caminho e tamanho) foi idêntica, e a cópia ocupou só **14 MB**. O Lutris continua funcionando com o original.
+
+### Instalação do Battle.net e o DPI
+
+3. **Com DPI 192, o instalador travou** na tela de idioma, com ~190% de CPU, sem abrir o Agent e sem criar arquivos. O vigia do `install-battlenet` reportou "*no progress for 5 minutes and seems stuck*" e não fechou nada. O instalador fechou com o `taskkill` sem `/f`.
+4. **Com DPI 96 (Windows 11 mantido), o instalador funcionou**, porém pequeno: o Agent subiu, o Battle.net foi instalado (779 MB) e abriu.
+5. **Com DPI 192, o Battle.net abriu, mas quebrou na etapa da senha do login** (`UAuth … state=LoginCredential`), com violação de acesso (`0xc0000005`) na thread principal, dentro de `Qt5Core.dll`/`Qt5Widgets.dll`. A 144 o login completou, e a sessão ficou salva.
+6. **Ponto comum:** o instalador e a janela de login são Qt (**Qt 5.15.1**), e o log mostra o Qt chamando `EnableNonClientDpiScaling()`, que o Wine não implementa. A janela principal é CEF e funciona a 192, o que explica o E8: lá havia sessão salva e a janela de senha não apareceu.
+
+### E11: a causa e a correção
+
+7. Num prefixo descartável igual à casinha (Windows 11, DPI 192), com **`QT_ENABLE_HIGHDPI_SCALING=0`** no ambiente:
+   - o **instalador funcionou** e ficou **legível a 192**;
+   - o Battle.net aberto por ele (herdando a variável) **completou o login com senha a 192**, sem quebrar.
+8. **Conclusão:** o modo de escala para alta densidade do Qt 5.15 trava ou quebra sob o Wine acima de 100%. Desligado, o Qt continua usando o DPI do Wine para textos e elementos. A variável virou o ambiente padrão da casinha (`HOUSE_ENV`) e é aplicada em tudo o que o Snow roda nela.
+9. O prefixo descartável foi apagado logo depois, com a sessão de login.
+
+### Abrir a casinha
+
+10. `snowctl house open`: com o Battle.net **na bandeja**, trouxe a janela de volta em **1 s**, no mesmo processo. Com ele **fechado**, abriu em **4 s**, legível a 192 e sem erro. O `QT_ENABLE_HIGHDPI_SCALING=0` estava no ambiente do processo, e o `umu-run` ficou num grupo de processos próprio (fechar o terminal não derruba o Battle.net).
+11. O "Localizar o jogo" registrou `G:/World of Warcraft`. O Battle.net reconheceu a cópia e tocou em 14 arquivos.
+
+### Lições
+
+- Um `regedit /S` de um arquivo **inexistente** termina com código 0 sem fazer nada (aconteceu quando o scratchpad foi limpo entre sessões). Verificar o resultado no registro, como o `house create` faz, é indispensável.
+- Backups de experimentos vão para `~/.local/state/snow-launcher/`, não para pastas temporárias.
+
+## O10 – E7: AppImage com GTK4/libadwaita
+
+**Data:** 2026-11-27
+**Como:** app mínimo Relm4 0.10 + libadwaita-rs 0.8 (Rust 1.85, binário de 708 KB) com a ilustração "Sobre" embutida; AppImage montado **sem o `appimagetool`**: `mksquashfs` (squashfs-tools do Fedora) + `type2-runtime` tag `20251108`; testes em contêineres podman com a janela no Wayland do host.
+
+### Ferramentas e verificação
+
+1. O `appimagetool` (incluindo a tag `1.9.1`) **não publica hash nem assinatura**. As compilações "contínuas" baixadas no início foram descartadas sem executar.
+2. O `type2-runtime` `20251108` publica assinatura GPG. A chave do lançamento é idêntica à do código-fonte na mesma tag (ed25519, `570C 77AC EA40 C0F1 B758 902C BF96 CCA5 6490 F695`). A verificação deu **"Good signature"**, e com 1 byte alterado, **"BAD signature"**. O runtime é `static-pie` e **não depende de `libfuse2`**.
+
+### Resultados (caminho A: GTK do sistema)
+
+3. AppImage de **1,2 MB**. O binário exige no máximo **glibc 2.34** e usa só a API base do GTK (29 funções).
+4. **Fedora 45** (nativo, montando via FUSE): GTK 4.24.2 / libadwaita 1.10.0. ✅
+5. **Arch** (contêiner): 4.24.2 / 1.10.0. ✅
+6. **Ubuntu 24.04** (contêiner): 4.14.5 / 1.5.0. Rodou, mas **o layout quebrou**: o título do `adw::StatusPage` saiu uma letra por linha e a imagem sumiu.
+   - Não era falta de driver: com Mesa, o GTK usou a GPU, e o problema continuou.
+   - Não era a imagem: sem ela, o mesmo aconteceu.
+   - Um relatório das larguras reais mostrou o conteúdo do `StatusPage` com 556 px de altura e o `GtkPicture` com **altura 0**. Com `ToolbarView` + `StatusPage`, igual.
+   - **Sem o `StatusPage`** (um `gtk::Label` com quebra de linha e o `GtkPicture`): título numa linha (520x32) e imagem 520x358, **confirmado visualmente**. ✅
+7. **Conclusão:** o caminho A funciona. A armadilha é de **layout por versão**: o mesmo código se comporta diferente na libadwaita 1.5. Base mínima adotada: **Ubuntu 24.04** (GTK 4.14, libadwaita 1.5).
+
+### Não testado
+
+- Ubuntu de verdade (com GPU e FUSE; nos contêineres foi usado o modo *extract-and-run*), Ubuntu 22.04 (fora da base) e sessão X11.
