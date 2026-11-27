@@ -34,9 +34,10 @@ FLAKES = '''<g fill="#9fb6d8">
 '''
 GROUND = '<path d="M 10 200 C 60 182, 260 182, 310 200 C 260 214, 60 214, 10 200 Z" fill="#e3eefc" stroke="#9fb6d8" stroke-width="2" stroke-linejoin="round"/>\n'
 
-def doc(w, h, title, body):
+def doc(w, h, title, body, top=0):
+    # `top`: extra room above y = 0, for what sticks out (the lights' glow).
     return (f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-            f'width="{w}" height="{h}" viewBox="0 0 {w} {h}">\n  <title>{title}</title>\n{body}</svg>\n')
+            f'width="{w}" height="{h + top}" viewBox="0 {-top} {w} {h + top}">\n  <title>{title}</title>\n{body}</svg>\n')
 
 out = {}
 
@@ -86,7 +87,8 @@ def bulbs(lit):
 for stage in (0, 1, 2, 3):
     body = house + peek + bulbs(stage)
     title = "Battle.net fechado" if stage == 0 else f"Iniciando, etapa {stage} de 3"
-    out[f"progress-{stage}.svg"] = doc(128, 128, title, body)
+    # The middle light's glow reaches y = -2.
+    out[f"progress-{stage}.svg"] = doc(128, 128, title, body, top=4)
 
 for name, text in out.items():
     open(f"{root}/data/illustrations/{name}", "w").write(text)
