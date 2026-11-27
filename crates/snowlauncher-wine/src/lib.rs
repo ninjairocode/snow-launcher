@@ -3,6 +3,7 @@
 pub mod battlenet_logs;
 pub mod config_file;
 pub mod desktop;
+pub mod house;
 pub mod instance;
 pub mod prefix;
 pub mod procfs;

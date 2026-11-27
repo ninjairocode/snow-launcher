@@ -76,7 +76,7 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum HouseAction {
-    /// Plan the creation of the house. Only --dry-run exists for now.
+    /// Create the house: prefix, Windows 11, UI scale and the G: library.
     Create {
         /// Only show what would be done.
         #[arg(long)]
@@ -95,6 +95,12 @@ enum HouseAction {
         /// newest GE-Proton found.
         #[arg(long, value_name = "PATH")]
         runtime: Option<PathBuf>,
+    },
+    /// Remove the house. Never deletes games.
+    Remove {
+        /// Only show what would be done.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -139,12 +145,11 @@ fn main() -> Result<()> {
                 library,
                 runtime,
             };
-            let text = house::create(options, &config)?;
-            io::stdout()
-                .lock()
-                .write_all(text.as_bytes())
-                .context("failed to write to stdout")
+            house::create(options, &config, &mut io::stdout().lock())
         }
+        Command::House {
+            action: HouseAction::Remove { dry_run },
+        } => house::remove(dry_run, &mut io::stdout().lock()),
         Command::Service { action } => service_command(action),
     }
 }

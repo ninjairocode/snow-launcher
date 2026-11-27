@@ -80,12 +80,13 @@ impl WinePrefix {
 ///
 /// Returns `None` if the home directory cannot be determined.
 pub fn default_prefix_path() -> Option<PathBuf> {
-    BaseDirs::new().map(|dirs| {
-        dirs.data_dir()
-            .join("snow-launcher")
-            .join("prefixes")
-            .join("battlenet")
-    })
+    prefixes_root().map(|root| root.join("battlenet"))
+}
+
+/// `$XDG_DATA_HOME/snow-launcher/prefixes`: the only place where Snow
+/// Launcher creates (and may delete) prefixes.
+pub fn prefixes_root() -> Option<PathBuf> {
+    BaseDirs::new().map(|dirs| dirs.data_dir().join("snow-launcher").join("prefixes"))
 }
 
 #[cfg(test)]
