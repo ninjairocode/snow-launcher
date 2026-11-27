@@ -179,8 +179,11 @@ pub fn run_battlenet(runner: &UmuRunner, args: &[&str]) -> Result<BattlenetRun, 
         runner.run_alongside(&command).map_err(io_problem)?;
         Ok(BattlenetRun::PassedToRunning)
     } else {
-        // Not waited for: Battle.net keeps running after we return.
-        runner.spawn(&command).map_err(io_problem)?;
+        // Battle.net keeps running after we return. A thread waits for it
+        // so that, once it exits, it does not linger as a zombie in a
+        // long-running caller (the GUI, snowd).
+        let mut child = runner.spawn(&command).map_err(io_problem)?;
+        std::thread::spawn(move || child.wait());
         Ok(BattlenetRun::Started)
     }
 }
@@ -467,18 +470,23 @@ pub fn save_record(path: &Path, record: &HouseRecord) -> Result<(), HouseError> 
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(io_err("create", dir))?;
     }
+    write_atomic(path, text.as_bytes()).map_err(io_err("write", path))
+}
+
+/// Writes a file atomically: temporary file next to it, flush to disk,
+/// rename. Readers see the old content or the new one, never half.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut tmp_name = OsString::from(path.as_os_str());
     tmp_name.push(".tmp");
     let tmp = PathBuf::from(tmp_name);
     let write = || -> io::Result<()> {
         let mut file = File::create(&tmp)?;
-        file.write_all(text.as_bytes())?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         fs::rename(&tmp, path)
     };
-    write().map_err(|source| {
+    write().inspect_err(|_| {
         let _ = fs::remove_file(&tmp);
-        io_err("write", path)(source)
     })
 }
 

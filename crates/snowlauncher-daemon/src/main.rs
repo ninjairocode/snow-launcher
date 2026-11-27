@@ -6,7 +6,9 @@
 //! - watches the games' connections while they run and warns when one
 //!   dies (e.g. after a suspend or a network outage: the game stays open
 //!   but no longer talks to the server);
-//! - after resume, logs how long the network took to come back.
+//! - after resume, logs how long the network took to come back;
+//! - shows Snow's item in the desktop tray, with Battle.net and the
+//!   games one click away.
 //!
 //! Restarting Battle.net comes later, once experiment E4 confirms the
 //! approach.
@@ -19,6 +21,7 @@ mod networkmanager;
 mod notifications;
 mod portal;
 mod resume;
+mod tray;
 
 use std::future::Future;
 use std::io::{self, IsTerminal};
@@ -132,6 +135,7 @@ async fn main() -> Result<()> {
         ..dbus::Status::default()
     });
     dbus::serve(&session_bus, status_rx.borrow().clone()).await?;
+    let tray_status = status_rx.clone();
 
     let mut sigterm = signal(SignalKind::terminate()).context("failed to listen for SIGTERM")?;
 
@@ -140,6 +144,7 @@ async fn main() -> Result<()> {
         result = watch_sleep(&mut sleep_monitor, &mut resume_watcher) => result?,
         result = watch_games(&game_table, prefix.path(), &mut game_guard, &mut connections, &status_tx, GAME_POLL_INTERVAL) => result?,
         result = dbus::publish(&session_bus, status_rx) => result?,
+        () = tray::run(&session_bus, tray_status) => {}
         _ = tokio::signal::ctrl_c() => info!("interrupted, stopping"),
         _ = sigterm.recv() => info!("received SIGTERM, stopping"),
     }
