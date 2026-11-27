@@ -1,0 +1,49 @@
+# cargo-deny policy (project.md, section 9.4). Run locally with
+# `cargo deny check`.
+
+[graph]
+# Snow Launcher only runs on Linux: ignore Windows/macOS-only crates.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+
+[advisories]
+# Known vulnerabilities and unmaintained crates come from the RustSec
+# database (the same one `cargo audit` uses).
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Must be compatible with GPL-3.0-or-later, the project's license.
+allow = [
+    "GPL-3.0-or-later", # Snow Launcher's own crates
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.93
+# Common permissive licenses are pre-approved even if no dependency uses
+# them yet, so adding a dependency does not break CI for no reason.
+unused-allowed-license = "allow"
+
+[bans]
+# Two versions of the same crate: allowed (often unavoidable), but shown.
+multiple-versions = "warn"
+# `version = "*"` dependencies are not allowed. Our own path dependencies
+# are fine.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# Only crates.io: no git dependencies, no other registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
