@@ -10,8 +10,6 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/ninjairocode/snow-launcher"
 authors = ["Jairo Bonifácio"]
 
-[workspace.dependencies]
-
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
