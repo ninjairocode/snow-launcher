@@ -388,7 +388,7 @@ O `doctor` lê os logs do Battle.net e do Wine, identifica erros conhecidos e pr
 
 | Erro | Correção |
 |---|---|
-| `BLZBNTBNA00000005` (Agent went to sleep) | Encerrar Battle.net e Agent, limpar `ProgramData/Battle.net` (com backup), reabrir |
+| `BLZBNTBNA00000005` (Agent went to sleep) | Encerrar Battle.net e Agent, limpar `ProgramData/Battle.net` (com backup), reabrir. **Só com sintoma** (mensagem visível; instalar, atualizar ou jogar falhando): sob o Wine, o código é registrado em toda inicialização sem afetar nada (`docs/experimentos.md`, O4) |
 | Não reconecta após suspender | Reinício limpo após o sinal de "acordar" e a volta da rede |
 | Loja não abre | Quirks de letra de unidade, versão do Windows e aceleração por hardware |
 | Update preso em 0% / "aguardando outra instalação" | Encerrar processos órfãos do prefixo, limpar locks, reabrir |

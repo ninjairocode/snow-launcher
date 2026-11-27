@@ -104,3 +104,28 @@ Resultados dos experimentos da seção 13 do `project.md` e de outras observaç�
 - [ ] Confirmar que a vigilância contínua avisa num caso real de conexão meio aberta (queda longa).
 - [ ] Suspensão longa com o WoW aberto: o jogo de fato perde a conexão? Em quanto tempo ele mesmo percebe? A checagem de retransmissões detecta isso?
 - [ ] Deixar o PC ocioso além do tempo de suspensão automática com o WoW aberto: confirmar que a tela apaga mas o PC não suspende.
+
+## O4 – Erro do Agent (`BLZBNTBNA00000005`) em toda inicialização
+
+**Data:** 2026-11-27
+**Ambiente:** o mesmo do O1 (Lutris + umu + GE-Proton11-14), Battle.net 2.53.8.
+**Como:** `snowctl doctor --sessions 20`; depois, Battle.net aberto com acompanhamento dos PIDs (`snowctl status` a cada 5 s) e dos logs do cliente e do Agent.
+
+### Resultados
+
+1. O código aparece em **15 de 15** sessões guardadas, sempre uma vez, cerca de 45 a 65 s depois de o Battle.net abrir, como uma linha de debug do `UrlManager` (`Resolved URL: key=/client/error/BLZBNTBNA00000005`). É o único código de erro resolvido nessas sessões.
+2. Linha do tempo de uma abertura (horário local):
+   ```
+   13:14:34  Battle.net abre
+   13:14:37  Agent abre (PID 33080)
+   13:15:39.598  cliente registra BLZBNTBNA00000005
+   13:15:39.635  cliente cria uma janela nova (EnableNonClientDpiScaling ... for HWND)
+   ```
+   O Agent **continuou vivo** (mesmo PID) e o log dele **não tem nenhum aviso ou erro** nesse minuto.
+3. **Nada apareceu na tela** e o Battle.net funcionou normalmente.
+
+### Conclusão
+
+Sob o Wine, o cliente acha que o Agent não respondeu a tempo enquanto ele ainda está subindo, registra o erro e se recupera sozinho. O erro só importa junto com um sintoma (mensagem visível; instalar, atualizar ou jogar não funciona). O `doctor` passou a marcá-lo como **"usually harmless"**, e a correção automática da seção 8 só deve agir com sintoma, nunca só porque o código está no log.
+
+Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicação no catálogo.

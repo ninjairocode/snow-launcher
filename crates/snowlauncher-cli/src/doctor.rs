@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use snowlauncher_core::battlenet_log::ErrorSighting;
-use snowlauncher_core::errors::known_error;
+use snowlauncher_core::errors::{Severity, known_error};
 
 /// How often an error code showed up in the sessions checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +96,11 @@ pub fn render(report: &Report) -> String {
         let _ = writeln!(out);
         match known_error(&error.code) {
             Some(known) => {
-                let _ = writeln!(out, "{}: {}", error.code, known.title);
+                let note = match known.severity {
+                    Severity::Harmless => " (usually harmless)",
+                    Severity::Problem => "",
+                };
+                let _ = writeln!(out, "{}: {}{note}", error.code, known.title);
                 let _ = writeln!(out, "  {}", seen(error, report.sessions_checked));
                 wrap_into(&mut out, "  What it means: ", known.meaning);
                 wrap_into(&mut out, "  What to do: ", known.advice);
@@ -210,7 +214,9 @@ mod tests {
         ]));
         assert!(out.contains("snowd:       running as a service\n"));
         assert!(out.contains("5 recent session(s) checked (2026-11-25 22:01 to 2026-11-27 01:01)"));
-        assert!(out.contains("BLZBNTBNA00000005: Battle.net Agent went to sleep\n"));
+        assert!(
+            out.contains("BLZBNTBNA00000005: Battle.net Agent went to sleep (usually harmless)\n")
+        );
         assert!(out.contains("Seen in 5 of 5 session(s), last at 2026-11-27 01:02:42."));
         assert!(out.contains("  What to do: "));
         assert!(out.contains("BLZBNTBGS80000011: not in Snow Launcher's catalog yet\n"));
