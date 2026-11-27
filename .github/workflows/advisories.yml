@@ -1,0 +1,22 @@
+# New vulnerabilities are published without our code changing, so check
+# the RustSec database every week too, not only on push.
+name: Security advisories
+
+on:
+  schedule:
+    # Mondays at 09:00 UTC.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: RustSec advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories

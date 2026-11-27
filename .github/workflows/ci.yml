@@ -65,3 +65,12 @@ jobs:
       # `+1.85.0` overrides rust-toolchain.toml, which pins `stable`.
       # Keep in sync with `rust-version` in Cargo.toml.
       - run: cargo +1.85.0 check --workspace --all-targets --locked
+
+  deny:
+    name: Dependencies (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Advisories (RustSec), licenses, banned crates and sources;
+      # policy in deny.toml.
+      - uses: EmbarkStudios/cargo-deny-action@v2
