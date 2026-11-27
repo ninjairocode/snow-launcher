@@ -5,6 +5,7 @@
 
 mod daemon;
 mod doctor;
+mod house;
 mod service;
 
 use std::fmt::Write as _;
@@ -60,10 +61,40 @@ enum Command {
         sessions: usize,
     },
 
+    /// Snow Launcher's own Battle.net prefix (the "house").
+    House {
+        #[command(subcommand)]
+        action: HouseAction,
+    },
+
     /// Run snowd as a systemd user service, started with the desktop.
     Service {
         #[command(subcommand)]
         action: ServiceAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HouseAction {
+    /// Plan the creation of the house. Only --dry-run exists for now.
+    Create {
+        /// Only show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Prefix to create. Defaults to Snow Launcher's own prefix.
+        #[arg(long, value_name = "PATH")]
+        prefix: Option<PathBuf>,
+
+        /// Game library, seen as G:. Defaults to [house] library, then
+        /// ~/Games/SnowLauncher.
+        #[arg(long, value_name = "PATH")]
+        library: Option<PathBuf>,
+
+        /// Proton build folder. Defaults to [house] runtime, then the
+        /// newest GE-Proton found.
+        #[arg(long, value_name = "PATH")]
+        runtime: Option<PathBuf>,
     },
 }
 
@@ -93,6 +124,27 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Status { prefix } => status(prefix, &config),
         Command::Doctor { prefix, sessions } => doctor_command(prefix, sessions, &config),
+        Command::House {
+            action:
+                HouseAction::Create {
+                    dry_run,
+                    prefix,
+                    library,
+                    runtime,
+                },
+        } => {
+            let options = house::CreateOptions {
+                dry_run,
+                prefix,
+                library,
+                runtime,
+            };
+            let text = house::create(options, &config)?;
+            io::stdout()
+                .lock()
+                .write_all(text.as_bytes())
+                .context("failed to write to stdout")
+        }
         Command::Service { action } => service_command(action),
     }
 }
