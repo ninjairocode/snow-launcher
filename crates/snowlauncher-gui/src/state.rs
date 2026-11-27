@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use snowlauncher_core::dbus::GameConnection;
 use snowlauncher_core::house::BATTLENET_EXE;
 use snowlauncher_wine::daemon_client::DaemonState;
-use snowlauncher_wine::house::{load_record, record_path};
+use snowlauncher_wine::house::{BattlenetRun, load_record, record_path};
+use snowlauncher_wine::library::InstalledGame;
 
 // TODO(i18n): translate (pt-BR) once gettext is in place (v0.6).
 
@@ -71,7 +72,14 @@ pub enum House {
     NoBattlenet,
     Ready {
         prefix: PathBuf,
+        library: PathBuf,
     },
+}
+
+impl House {
+    pub fn is_ready(&self) -> bool {
+        matches!(self, House::Ready { .. })
+    }
 }
 
 /// Reads the house record and checks for Battle.net. Errors count as
@@ -83,6 +91,7 @@ pub fn read_house() -> House {
     if record.prefix.join(BATTLENET_EXE).is_file() {
         House::Ready {
             prefix: record.prefix,
+            library: record.library,
         }
     } else {
         House::NoBattlenet
@@ -109,11 +118,46 @@ pub fn house_text(house: &House) -> (Illustration, &'static str, String) {
             "Battle.net is not installed",
             "Install it with `snowctl house install-battlenet --installer PATH`.".to_owned(),
         ),
-        House::Ready { prefix } => (
+        House::Ready { prefix, .. } => (
             Illustration::Ready,
             "The house is ready",
             format!("Battle.net lives in {}.", prefix.display()),
         ),
+    }
+}
+
+/// One game of the library, as its row shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameCard {
+    pub name: String,
+    pub detail: String,
+    /// `None` until Battle.net's log reveals it: "Play" stays disabled.
+    pub launch_code: Option<String>,
+}
+
+pub fn game_cards(games: &[InstalledGame]) -> Vec<GameCard> {
+    games
+        .iter()
+        .map(|game| GameCard {
+            name: game.name.clone(),
+            detail: match (&game.launch_code, &game.build.version) {
+                (None, _) => {
+                    "Open Battle.net once, logged in, so Snow learns how to launch it".to_owned()
+                }
+                (Some(_), Some(version)) => format!("Version {version}"),
+                (Some(_), None) => "Installed".to_owned(),
+            },
+            launch_code: game.launch_code.clone(),
+        })
+        .collect()
+}
+
+/// The toast after an action (`what`: "Battle.net", "World of Warcraft").
+pub fn action_message(what: &str, result: &Result<BattlenetRun, String>) -> String {
+    match result {
+        Ok(BattlenetRun::Started) => format!("Starting Battle.net for {what}…"),
+        Ok(BattlenetRun::PassedToRunning) => format!("{what}: request sent to Battle.net"),
+        Err(problem) => format!("Could not open {what}: {problem}"),
     }
 }
 
@@ -171,7 +215,41 @@ mod tests {
         );
         let ready = House::Ready {
             prefix: PathBuf::from("/pfx"),
+            library: PathBuf::from("/games"),
         };
         assert_eq!(house_text(&ready).0, Illustration::Ready);
+        assert!(ready.is_ready() && !House::NoBattlenet.is_ready());
+    }
+
+    fn game(code: Option<&str>, version: Option<&str>) -> InstalledGame {
+        InstalledGame {
+            name: "World of Warcraft".to_owned(),
+            path: PathBuf::from("/games/World of Warcraft"),
+            build: snowlauncher_core::library::BuildInfo {
+                product: "wowf".to_owned(),
+                version: version.map(str::to_owned),
+            },
+            launch_code: code.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_game_without_launch_code_explains_why() {
+        let cards = game_cards(&[game(Some("WoWF"), Some("1.60")), game(None, Some("1.60"))]);
+        assert_eq!(cards[0].detail, "Version 1.60");
+        assert_eq!(cards[0].launch_code.as_deref(), Some("WoWF"));
+        assert!(cards[1].detail.contains("Open Battle.net once"));
+        assert_eq!(cards[1].launch_code, None);
+    }
+
+    #[test]
+    fn action_messages() {
+        assert_eq!(
+            action_message("World of Warcraft", &Ok(BattlenetRun::PassedToRunning)),
+            "World of Warcraft: request sent to Battle.net"
+        );
+        assert!(
+            action_message("Battle.net", &Err("umu-run not found".to_owned())).contains("umu-run")
+        );
     }
 }

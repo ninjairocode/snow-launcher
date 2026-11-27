@@ -98,6 +98,42 @@ pub struct HouseRecordView {
     pub library: PathBuf,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum OpenHouseError {
+    #[error("could not determine the state directory")]
+    NoStateDir,
+    #[error("there is no house yet")]
+    NoHouse,
+    #[error("the house's prefix {} is missing", .0.display())]
+    PrefixMissing(PathBuf),
+    #[error("umu-run not found: install umu-launcher (or Lutris, which bundles it)")]
+    NoUmuRun,
+    #[error(transparent)]
+    Record(#[from] HouseError),
+}
+
+/// Reads the house's record and prepares a runner for it, with the
+/// house's environment. Shared by `snowctl` and the GUI.
+pub fn open_house() -> Result<(HouseRecordView, UmuRunner), OpenHouseError> {
+    let record_file = record_path().ok_or(OpenHouseError::NoStateDir)?;
+    let record = load_record(&record_file)?.ok_or(OpenHouseError::NoHouse)?;
+    let prefix = fs::canonicalize(&record.prefix)
+        .map_err(|_| OpenHouseError::PrefixMissing(record.prefix.clone()))?;
+    let runner = UmuRunner {
+        umu_run: crate::runtime::find_umu_run().ok_or(OpenHouseError::NoUmuRun)?,
+        prefix: prefix.clone(),
+        runtime: record.runtime_path.clone(),
+        log: open_log_path().ok_or(OpenHouseError::NoStateDir)?,
+    };
+    Ok((
+        HouseRecordView {
+            prefix,
+            library: record.library,
+        },
+        runner,
+    ))
+}
+
 /// What [`run_battlenet`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BattlenetRun {
