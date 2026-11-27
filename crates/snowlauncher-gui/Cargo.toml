@@ -1,0 +1,22 @@
+[package]
+name = "snowlauncher-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "snow-launcher"
+path = "src/main.rs"
+
+[dependencies]
+libadwaita = { version = "0.8", features = ["v1_4"] }
+relm4 = { version = "0.10", features = ["libadwaita"] }
+snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
+snowlauncher-wine = { version = "0.1.0", path = "../snowlauncher-wine" }
+tokio = { version = "1.54.1", features = ["time"] }
+
+[lints]
+workspace = true

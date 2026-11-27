@@ -1,98 +1,11 @@
-//! Asking the running `snowd` what it sees, over its D-Bus interface.
+//! The `snowd` block of `snowctl status` (the query lives in
+//! `snowlauncher_wine::daemon_client`, shared with the GUI).
 
 use std::fmt::Write as _;
 use std::path::Path;
 
-use anyhow::{Context, Result};
-use snowlauncher_core::dbus::{BUS_NAME, GameConnection, INTERFACE, OBJECT_PATH, property};
-use snowlauncher_wine::instance::{default_lock_path, running_instance};
-
-/// What `snowd` reported.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DaemonView {
-    pub version: String,
-    pub prefix: String,
-    pub running_games: Vec<String>,
-    pub suspend_inhibited: bool,
-    pub game_connection: String,
-}
-
-#[derive(Debug)]
-pub enum DaemonState {
-    Running(DaemonView),
-    /// Holds the single-instance lock but has no D-Bus interface: an
-    /// older snowd, from before the interface existed.
-    RunningWithoutInterface {
-        pid: Option<u32>,
-    },
-    NotRunning,
-    /// Could not ask (no session bus, unexpected error...).
-    Unknown(anyhow::Error),
-}
-
-/// Queries `snowd`. Never fails: problems become [`DaemonState::Unknown`].
-pub fn query() -> DaemonState {
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(error) => return DaemonState::Unknown(error.into()),
-    };
-    match runtime.block_on(query_async()) {
-        Ok(Some(view)) => DaemonState::Running(view),
-        Ok(None) => match default_lock_path().map(|path| running_instance(&path)) {
-            Some(Ok(Some(instance))) => DaemonState::RunningWithoutInterface { pid: instance.pid },
-            _ => DaemonState::NotRunning,
-        },
-        Err(error) => DaemonState::Unknown(error),
-    }
-}
-
-async fn query_async() -> Result<Option<DaemonView>> {
-    let bus = zbus::Connection::session()
-        .await
-        .context("could not connect to the session D-Bus")?;
-    let proxy = zbus::proxy::Builder::<zbus::Proxy<'_>>::new(&bus)
-        .destination(BUS_NAME)?
-        .path(OBJECT_PATH)?
-        .interface(INTERFACE)?
-        // Read fresh values; do not subscribe to changes.
-        .cache_properties(zbus::proxy::CacheProperties::No)
-        .build()
-        .await?;
-
-    // The first read tells whether anyone owns the name.
-    let version: String = match proxy.get_property(property::VERSION).await {
-        Ok(version) => version,
-        Err(error) if nobody_owns_the_name(&error) => return Ok(None),
-        Err(error) => return Err(error).context("could not read snowd's status"),
-    };
-    Ok(Some(DaemonView {
-        version,
-        prefix: proxy.get_property(property::PREFIX).await?,
-        running_games: proxy.get_property(property::RUNNING_GAMES).await?,
-        suspend_inhibited: proxy.get_property(property::SUSPEND_INHIBITED).await?,
-        game_connection: proxy.get_property(property::GAME_CONNECTION).await?,
-    }))
-}
-
-/// The bus answers "no such name" when snowd is not running, either as a
-/// standard D-Bus error or as a raw method error with the same name.
-fn nobody_owns_the_name(error: &zbus::Error) -> bool {
-    const NOT_RUNNING: [&str; 2] = [
-        "org.freedesktop.DBus.Error.ServiceUnknown",
-        "org.freedesktop.DBus.Error.NameHasNoOwner",
-    ];
-    match error {
-        zbus::Error::FDO(fdo) => matches!(
-            **fdo,
-            zbus::fdo::Error::ServiceUnknown(_) | zbus::fdo::Error::NameHasNoOwner(_)
-        ),
-        zbus::Error::MethodError(name, _, _) => NOT_RUNNING.contains(&name.as_str()),
-        _ => false,
-    }
-}
+use snowlauncher_core::dbus::GameConnection;
+pub use snowlauncher_wine::daemon_client::{DaemonState, query};
 
 /// The `snowd` block of `snowctl status`. `prefix` is the one being shown,
 /// to point out when the daemon watches another.
@@ -114,7 +27,14 @@ pub fn render(state: &DaemonState, prefix: &Path) -> String {
             );
         }
         DaemonState::Unknown(error) => {
-            let _ = writeln!(out, "snowd:      unknown ({error:#})");
+            // Show the whole cause chain on one line.
+            let mut text = error.to_string();
+            let mut source = std::error::Error::source(error);
+            while let Some(cause) = source {
+                text.push_str(&format!(": {cause}"));
+                source = cause.source();
+            }
+            let _ = writeln!(out, "snowd:      unknown ({text})");
         }
         DaemonState::Running(view) => {
             let _ = writeln!(out, "snowd:      running (v{})", view.version);
@@ -150,6 +70,7 @@ pub fn render(state: &DaemonState, prefix: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use snowlauncher_wine::daemon_client::DaemonView;
 
     fn view() -> DaemonView {
         DaemonView {
