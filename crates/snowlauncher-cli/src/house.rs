@@ -22,9 +22,10 @@ use snowlauncher_core::process::ProcessRole;
 use snowlauncher_core::process::{ProcessTable, processes_in_prefix};
 use snowlauncher_wine::desktop::desktop_dpi;
 use snowlauncher_wine::house::{
-    self as executor, UmuRunner, create_log_path, load_record, open_log_path, record_path,
-    save_record,
+    self as executor, UmuRunner, create_log_path, launch_argument, load_record, open_log_path,
+    record_path, save_record,
 };
+use snowlauncher_wine::library::{installed_games, known_product_codes};
 use snowlauncher_wine::prefix::{default_prefix_path, prefixes_root};
 use snowlauncher_wine::procfs::ProcfsProcessTable;
 use snowlauncher_wine::runtime::{Runtime, find_runtimes, find_umu_run, runtime_dirs};
@@ -256,13 +257,13 @@ pub fn install_battlenet(installer: &Path, dry_run: bool, out: &mut impl io::Wri
     }
 }
 
-/// What `house open` does, depending on the house's state.
+/// What `house open` and `play` will do, depending on the house's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OpenAction {
     /// Battle.net is closed: start it.
     Start,
-    /// Battle.net is open (maybe only in the tray): bring its window back.
-    BringBack,
+    /// Battle.net is open (maybe only in the tray): pass the request to it.
+    PassToRunning,
 }
 
 fn open_action(installed: bool, running: bool) -> Result<OpenAction> {
@@ -272,7 +273,7 @@ fn open_action(installed: bool, running: bool) -> Result<OpenAction> {
          `snowctl house install-battlenet --installer PATH`"
     );
     Ok(if running {
-        OpenAction::BringBack
+        OpenAction::PassToRunning
     } else {
         OpenAction::Start
     })
@@ -281,40 +282,13 @@ fn open_action(installed: bool, running: bool) -> Result<OpenAction> {
 /// How long to wait for Battle.net to show up after starting it.
 const START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// `snowctl house open`: opens Battle.net in the house, with the house's
-/// environment (the Qt fix, E11), or brings its window back.
-pub fn open(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+/// The house's record, its canonical prefix and a runner for it.
+fn house_runner() -> Result<(executor::HouseRecordView, UmuRunner)> {
     let record_file = record_path().context("could not determine the state directory")?;
     let record = load_record(&record_file)?
         .context("there is no house yet; create it first with `snowctl house create`")?;
     let prefix = fs::canonicalize(&record.prefix)
         .with_context(|| format!("the house's prefix {} is missing", record.prefix.display()))?;
-    let exe = prefix.join(BATTLENET_EXE);
-    let battlenet_pid = || -> Result<Option<u32>> {
-        let processes = ProcfsProcessTable::new()
-            .processes()
-            .context("failed to list processes")?;
-        Ok(processes_in_prefix(&processes, &prefix)
-            .find(|p| ProcessRole::of(p) == ProcessRole::BattleNet)
-            .map(|p| p.pid.0))
-    };
-    let action = open_action(exe.is_file(), battlenet_pid()?.is_some())?;
-
-    let what = match action {
-        OpenAction::Start => "start Battle.net",
-        OpenAction::BringBack => "Battle.net is already open: bring its window back",
-    };
-    let mode = if dry_run {
-        " (dry run: nothing is changed)"
-    } else {
-        ""
-    };
-    writeln!(out, "Open Battle.net in the house{mode}")?;
-    writeln!(out, "  {what}")?;
-    if dry_run {
-        return Ok(());
-    }
-
     let runner = UmuRunner {
         umu_run: find_umu_run()
             .context("umu-run not found: install umu-launcher (or Lutris, which bundles it)")?,
@@ -322,22 +296,50 @@ pub fn open(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
         runtime: record.runtime_path.clone(),
         log: open_log_path().context("could not determine the state directory")?,
     };
-    match action {
-        OpenAction::BringBack => {
-            runner
-                .run_alongside(&[exe.as_os_str()])
-                .context("could not reach the running Battle.net")?;
-            writeln!(out, "Its window should be back on screen.")?;
+    Ok((
+        executor::HouseRecordView {
+            prefix,
+            library: record.library,
+        },
+        runner,
+    ))
+}
+
+/// Runs Battle.net with `args` and, if it had to start, waits until its
+/// process shows up.
+fn run_and_report(
+    runner: &UmuRunner,
+    args: &[&str],
+    what: &str,
+    dry_run: bool,
+    out: &mut impl io::Write,
+) -> Result<()> {
+    let installed = runner.prefix.join(BATTLENET_EXE).is_file();
+    let running = executor::battlenet_pid(&runner.prefix)?.is_some();
+    let action = open_action(installed, running)?;
+    let how = match action {
+        OpenAction::Start => "start Battle.net",
+        OpenAction::PassToRunning => "Battle.net is already open: pass it the request",
+    };
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "{what}{mode}")?;
+    writeln!(out, "  {how}")?;
+    if dry_run {
+        return Ok(());
+    }
+    match executor::run_battlenet(runner, args)? {
+        executor::BattlenetRun::PassedToRunning => {
+            writeln!(out, "Done.")?;
         }
-        OpenAction::Start => {
-            // Not waited for: Battle.net keeps running after we exit.
-            let _child = runner
-                .spawn(&[exe.as_os_str()])
-                .context("could not start Battle.net")?;
+        executor::BattlenetRun::Started => {
             let started = std::time::Instant::now();
             while started.elapsed() < START_TIMEOUT {
                 std::thread::sleep(WATCH_EVERY);
-                if let Some(pid) = battlenet_pid()? {
+                if let Some(pid) = executor::battlenet_pid(&runner.prefix)? {
                     writeln!(out, "Battle.net is starting (pid {pid}).")?;
                     return Ok(());
                 }
@@ -350,6 +352,76 @@ pub fn open(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// `snowctl house open`: opens Battle.net in the house, with the house's
+/// environment (the Qt fix, E11), or brings its window back.
+pub fn open(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    let (_, runner) = house_runner()?;
+    run_and_report(&runner, &[], "Open Battle.net in the house", dry_run, out)
+}
+
+/// `snowctl games`: the games in the house's library and their launch
+/// codes.
+pub fn games(out: &mut impl io::Write) -> Result<()> {
+    let (house, _) = house_runner()?;
+    let codes = known_product_codes(&house.prefix);
+    let games = installed_games(&house.library, &codes);
+    if games.is_empty() {
+        writeln!(
+            out,
+            "No games in the library ({}).",
+            house.library.display()
+        )?;
+        return Ok(());
+    }
+    for game in &games {
+        let version = game.build.version.as_deref().unwrap_or("?");
+        let code = game
+            .launch_code
+            .as_deref()
+            .unwrap_or("unknown yet (open Battle.net once, logged in, so it shows up in its log)");
+        writeln!(out, "{}", game.name)?;
+        writeln!(
+            out,
+            "  product: {}   version: {version}",
+            game.build.product
+        )?;
+        writeln!(out, "  launch code: {code}")?;
+    }
+    Ok(())
+}
+
+/// `snowctl play <game>`: opens a game through Battle.net. `<game>` is
+/// the folder name or the product uid, ignoring case.
+pub fn play(game: &str, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    let (house, runner) = house_runner()?;
+    let games = installed_games(&house.library, &known_product_codes(&house.prefix));
+    let found = games
+        .iter()
+        .find(|g| g.name.eq_ignore_ascii_case(game) || g.build.product.eq_ignore_ascii_case(game))
+        .with_context(|| {
+            let names: Vec<&str> = games.iter().map(|g| g.name.as_str()).collect();
+            format!(
+                "no game called {game:?} in the library (found: {})",
+                names.join(", ")
+            )
+        })?;
+    let code = found.launch_code.as_deref().with_context(|| {
+        format!(
+            "the launch code of {} is not known yet: open Battle.net once, logged in \
+             (`snowctl house open`), then try again",
+            found.name
+        )
+    })?;
+    let argument = launch_argument(code);
+    run_and_report(
+        &runner,
+        &[argument.as_str()],
+        &format!("Play {} ({argument})", found.name),
+        dry_run,
+        out,
+    )
 }
 
 /// Stops with an explanation, leaving whatever is open for the user to see.
@@ -601,7 +673,7 @@ mod tests {
     #[test]
     fn open_starts_or_brings_back() {
         assert_eq!(open_action(true, false).unwrap(), OpenAction::Start);
-        assert_eq!(open_action(true, true).unwrap(), OpenAction::BringBack);
+        assert_eq!(open_action(true, true).unwrap(), OpenAction::PassToRunning);
         let error = open_action(false, false).unwrap_err().to_string();
         assert!(error.contains("install-battlenet"), "{error}");
     }

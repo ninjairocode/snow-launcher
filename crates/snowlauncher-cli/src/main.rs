@@ -69,6 +69,19 @@ enum Command {
         path: PathBuf,
     },
 
+    /// List the games in the house's library and their launch codes.
+    Games,
+
+    /// Open a game through Battle.net in the house.
+    Play {
+        /// Folder name (`"World of Warcraft"`) or product uid (`wowf`).
+        game: String,
+
+        /// Only show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Snow Launcher's own Battle.net prefix (the "house").
     House {
         #[command(subcommand)]
@@ -156,6 +169,8 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Status { prefix } => status(prefix, &config),
         Command::Doctor { prefix, sessions } => doctor_command(prefix, sessions, &config),
+        Command::Games => house::games(&mut io::stdout().lock()),
+        Command::Play { game, dry_run } => house::play(&game, dry_run, &mut io::stdout().lock()),
         Command::CheckInstaller { path } => {
             let report = installer::check(&path)?;
             io::stdout()
