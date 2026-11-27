@@ -6,6 +6,7 @@
 mod daemon;
 mod doctor;
 mod house;
+mod installer;
 mod service;
 
 use std::fmt::Write as _;
@@ -59,6 +60,13 @@ enum Command {
         /// How many recent Battle.net sessions to check.
         #[arg(long, value_name = "N", default_value_t = 5)]
         sessions: usize,
+    },
+
+    /// Check that a Battle.net installer is Blizzard's, unmodified.
+    CheckInstaller {
+        /// The installer, e.g. ~/Downloads/Battle.net-Setup.exe.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
     },
 
     /// Snow Launcher's own Battle.net prefix (the "house").
@@ -130,6 +138,13 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Status { prefix } => status(prefix, &config),
         Command::Doctor { prefix, sessions } => doctor_command(prefix, sessions, &config),
+        Command::CheckInstaller { path } => {
+            let report = installer::check(&path)?;
+            io::stdout()
+                .lock()
+                .write_all(report.as_bytes())
+                .context("failed to write to stdout")
+        }
         Command::House {
             action:
                 HouseAction::Create {

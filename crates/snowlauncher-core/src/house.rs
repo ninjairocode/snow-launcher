@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::display::DpiChoice;
 
+/// Organization in the certificate that signs the Battle.net installer.
+pub const BATTLENET_PUBLISHER: &str = "Blizzard Entertainment, Inc.";
+
 /// Windows version the prefix reports (`winecfg -v`).
 pub const WINDOWS_VERSION: &str = "win11";
 /// Drive letter of the game library inside the prefix.

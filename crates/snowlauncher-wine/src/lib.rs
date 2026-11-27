@@ -8,3 +8,4 @@ pub mod instance;
 pub mod prefix;
 pub mod procfs;
 pub mod runtime;
+pub mod signature;
