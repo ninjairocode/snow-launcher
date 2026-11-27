@@ -6,6 +6,7 @@ pub mod daemon_client;
 pub mod desktop;
 pub mod house;
 pub mod instance;
+pub mod library;
 pub mod prefix;
 pub mod procfs;
 pub mod runtime;

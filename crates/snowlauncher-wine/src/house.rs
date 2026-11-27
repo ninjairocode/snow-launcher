@@ -91,6 +91,69 @@ impl WineRunner for UmuRunner {
     }
 }
 
+/// Where the house lives, as callers need it (canonical prefix).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HouseRecordView {
+    pub prefix: PathBuf,
+    pub library: PathBuf,
+}
+
+/// What [`run_battlenet`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BattlenetRun {
+    /// Battle.net was closed and is starting.
+    Started,
+    /// Battle.net was open; the request went to it (window back, or a
+    /// game launched), as validated in experiment E9.
+    PassedToRunning,
+}
+
+/// The house's main Battle.net process, if running.
+pub fn battlenet_pid(prefix: &Path) -> Result<Option<u32>, HouseError> {
+    use snowlauncher_core::process::{ProcessRole, ProcessTable, processes_in_prefix};
+    let processes = crate::procfs::ProcfsProcessTable::new()
+        .processes()
+        .map_err(|error| HouseError::Step {
+            step: "list processes".to_owned(),
+            problem: error.to_string(),
+        })?;
+    Ok(processes_in_prefix(&processes, prefix)
+        .find(|process| ProcessRole::of(process) == ProcessRole::BattleNet)
+        .map(|process| process.pid.0))
+}
+
+/// Runs `Battle.net.exe <args>` in the house: starts it if closed, or
+/// hands the request to the running one. No arguments opens (or brings
+/// back) the window; `--exec=launch <code>` opens a game (E5).
+pub fn run_battlenet(runner: &UmuRunner, args: &[&str]) -> Result<BattlenetRun, HouseError> {
+    let exe = runner.prefix.join(snowlauncher_core::house::BATTLENET_EXE);
+    if !exe.is_file() {
+        return Err(HouseError::Step {
+            step: "open Battle.net".to_owned(),
+            problem: "it is not installed in the house".to_owned(),
+        });
+    }
+    let mut command: Vec<&std::ffi::OsStr> = vec![exe.as_os_str()];
+    command.extend(args.iter().map(std::ffi::OsStr::new));
+    let io_problem = |error: io::Error| HouseError::Step {
+        step: "open Battle.net".to_owned(),
+        problem: error.to_string(),
+    };
+    if battlenet_pid(&runner.prefix)?.is_some() {
+        runner.run_alongside(&command).map_err(io_problem)?;
+        Ok(BattlenetRun::PassedToRunning)
+    } else {
+        // Not waited for: Battle.net keeps running after we return.
+        runner.spawn(&command).map_err(io_problem)?;
+        Ok(BattlenetRun::Started)
+    }
+}
+
+/// `--exec=launch <code>`, the argument that opens a game (E5).
+pub fn launch_argument(code: &str) -> String {
+    format!("--exec=launch {code}")
+}
+
 /// Total size of the files under `path`, without following symlinks.
 /// Unreadable entries are skipped: this is for progress, not accounting.
 pub fn dir_size(path: &Path) -> u64 {
@@ -630,6 +693,25 @@ mod tests {
         // Without it the installer freezes above 100% DPI (E11).
         assert!(envs.contains(&("QT_ENABLE_HIGHDPI_SCALING".to_owned(), "0".to_owned())));
         assert!(envs.contains(&("WINEPREFIX".to_owned(), "/pfx".to_owned())));
+    }
+
+    #[test]
+    fn launch_argument_is_a_single_argument() {
+        // One argv entry, as Battle.net expects `--exec="launch WoWF"`.
+        assert_eq!(launch_argument("WoWF"), "--exec=launch WoWF");
+    }
+
+    #[test]
+    fn running_battlenet_needs_it_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runner = UmuRunner {
+            umu_run: PathBuf::from("/nonexistent/umu-run"),
+            prefix: tmp.path().to_owned(),
+            runtime: PathBuf::from("/runtime"),
+            log: tmp.path().join("log"),
+        };
+        let error = run_battlenet(&runner, &[]).unwrap_err().to_string();
+        assert!(error.contains("not installed"), "{error}");
     }
 
     #[test]

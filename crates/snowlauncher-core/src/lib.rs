@@ -11,6 +11,7 @@ pub mod display;
 pub mod errors;
 pub mod house;
 pub mod install;
+pub mod library;
 pub mod network;
 pub mod process;
 pub mod registry;
