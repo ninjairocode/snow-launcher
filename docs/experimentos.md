@@ -290,8 +290,31 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
    - Não era a imagem: sem ela, o mesmo aconteceu.
    - Um relatório das larguras reais mostrou o conteúdo do `StatusPage` com 556 px de altura e o `GtkPicture` com **altura 0**. Com `ToolbarView` + `StatusPage`, igual.
    - **Sem o `StatusPage`** (um `gtk::Label` com quebra de linha e o `GtkPicture`): título numa linha (520x32) e imagem 520x358, **confirmado visualmente**. ✅
-7. **Conclusão:** o caminho A funciona. A armadilha é de **layout por versão**: o mesmo código se comporta diferente na libadwaita 1.5. Base mínima adotada: **Ubuntu 24.04** (GTK 4.14, libadwaita 1.5).
+7. **Conclusão:** o caminho A funciona. Base mínima adotada: **Ubuntu 24.04** (GTK 4.14, libadwaita 1.5).
+   - **Corrigido no O11:** a "armadilha de layout por versão" estava errada. A causa era o contêiner sem `gtk-xft-dpi`, e não a libadwaita 1.5.
 
 ### Não testado
 
 - Ubuntu de verdade (com GPU e FUSE; nos contêineres foi usado o modo *extract-and-run*), Ubuntu 22.04 (fora da base) e sessão X11.
+
+## O11 – Correção do E7: o `Clamp` sem DPI de texto, e não a libadwaita 1.5
+
+**Data:** 2026-11-27
+**Contexto:** a primeira janela da GUI (`snowlauncher-gui`, com `ScrolledWindow` + `adw::Clamp` e **sem** `StatusPage`) ficou perfeita no Fedora, mas no contêiner Ubuntu 24.04 toda a coluna de conteúdo encolheu para ~110 px: texto quebrando a cada palavra, ilustração pequena e lista espremida. Era o mesmo sintoma do `StatusPage` no O10, sem usar o `StatusPage`.
+
+### Resultados
+
+1. No contêiner, o GTK enxerga **`gtk-xft-dpi = -1`** (não definido): não há o serviço de configurações do GNOME.
+2. Desde a libadwaita 1.4, o `adw::Clamp` mede a largura máxima em **"sp"** e converte para pixels com esse DPI. Com o DPI não definido, a conversão quebra:
+   - `Clamp` em "sp": título com **91 px** de largura;
+   - `Clamp` em **pixels**: título com **502x32**, normal.
+3. **Com o DPI definido** (um `settings.ini` do GTK com `gtk-xft-dpi=98304`, como num desktop de verdade), no mesmo Ubuntu 24.04:
+   - o `StatusPage` do O10 **funciona** (`Clamp` 496x62, imagem 496x263);
+   - o `Clamp` em "sp" também (título 502x32).
+4. **Conclusão:** o `StatusPage` da libadwaita 1.5 não tem defeito; o que quebra é o `Clamp` (dentro ou fora do `StatusPage`) **sem DPI de texto**. Em desktops normais isso não acontece, mas ambientes sem serviço de configurações existem.
+5. **Proteção na GUI:** se `gtk-xft-dpi <= 0`, o `Clamp` passa a usar pixels. Com o DPI definido, continua em "sp", que respeita a escala de texto do usuário. Conferido visualmente no Ubuntu sem DPI definido: coluna em largura normal.
+6. **Glibc:** o binário da GUI compilado no Fedora 45 exige **glibc 2.39**, exatamente a do Ubuntu 24.04, sem margem (o app mínimo do E7 exigia 2.34). O AppImage oficial deve ser compilado no Ubuntu 24.04, como o CI já faz.
+
+### Lição de método
+
+- Um contêiner não é um desktop: além dos drivers de vídeo (O10), faltam serviços como o de configurações. Antes de culpar uma versão de biblioteca, comparar o **mesmo ambiente** com e sem a peça suspeita.
