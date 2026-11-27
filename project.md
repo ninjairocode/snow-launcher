@@ -393,30 +393,42 @@ A tela principal da casinha tem:
 - Se o Battle.net estiver fechado, o Snow inicia, espera ficar pronto (ver seção 5) e depois abre o jogo. Atualizações pendentes são tratadas pelo próprio Battle.net.
 
 **Visual:**
-- **Sem artes ou logos oficiais da Blizzard.** Usar um quadrado com a inicial ou ícones próprios no estilo do Snow.
+- **Sem artes ou logos oficiais da Blizzard no projeto.** Nada disso entra no repositório, no AppImage ou no site.
+- **Ícones dos jogos tirados da instalação do próprio usuário.** O `Wow.exe` e o `Battle.net.exe` trazem o próprio ícone embutido, em até 256×256 (conferido). O Snow lê esse ícone do executável **na máquina do usuário**, guarda uma cópia em `~/.cache/snow-launcher/icons/` e mostra nos cards dos jogos, na barra de status e nas notificações (por exemplo, o aviso de conexão perdida com o ícone do jogo). É o mesmo que um gerenciador de arquivos faz ao mostrar o ícone de um `.exe`: nada é distribuído pelo Snow. Sem ícone legível, usar um quadrado com a inicial no estilo do Snow.
 - No libadwaita: `GtkFlowBox` de cards numa página simples. O Bottles é uma boa referência visual.
+
+### Ícone do Battle.net na bandeja
+
+O ícone que o Battle.net põe na bandeja do sistema fica **pequeno e borrado**: o Wine repassa à bandeja do desktop (no GNOME, pela extensão AppIndicator) o ícone pequeno do programa (16 ou 32 px), e a bandeja amplia. O Snow **não altera arquivos do Battle.net**, então a saída é substituir o ícone da bandeja, não o do Battle.net:
+
+- **Item próprio do Snow na bandeja** (StatusNotifierItem pelo D-Bus; nativo no KDE, e no GNOME com a extensão AppIndicator), com um ícone nítido e um menu: abrir o Battle.net, os jogos e sair.
+- **Qual ícone**, por opção: `tray_icon = "battlenet"` (o ícone de 256 px tirado do `Battle.net.exe` do usuário, nítido) ou `"snow"` (o ícone do Snow).
+- **Esconder o ícone borrado do Battle.net** no Wine, para não haver dois. Validar no **E9**: como esconder (configuração do Battle.net ou do Wine) e, principalmente, se "abrir o Battle.net" pelo menu do Snow traz de volta a janela quando o Battle.net está só na bandeja. Sem isso, o usuário perderia o acesso ao Battle.net.
+- Sem a extensão AppIndicator no GNOME, não há bandeja; aí vale o portal Background e as notificações (seção 5).
 
 ### Identidade visual e paleta
 
 **A metáfora central é a casinha de cachorro.** O Snow Launcher cuida da "casinha" onde o Battle.net mora (seção 5), e a identidade visual mostra isso literalmente: o Snow e a casinha dele. A casinha fica nas ilustrações, **não no formato da janela**: a janela principal continua retangular e nativa do libadwaita, para se comportar bem no GNOME (maximizar, encaixar, sombra, acessibilidade).
 
-**Ícone do app (novo, a desenhar):** a **cabeça do Snow saindo pela porta da casinha**, com chapéu de mago azul e lua dourada, a mancha caramelo no olho esquerdo e a piscadinha no olho direito. Telhado azul-noite com neve, madeira em tons de caramelo. É uma silhueta simples, legível em 32 px ou menos, o que **resolve a pendência** do ícone de corpo inteiro perder detalhe em tamanhos pequenos. Arquivo: `data/icons/io.github.ninjairocode.SnowLauncher.svg`.
+**Ícone do app:** a **cabeça do Snow saindo pela porta da casinha**, com chapéu de mago azul e lua dourada, a mancha caramelo no olho esquerdo e a piscadinha no olho direito. Telhado azul-noite com neve, madeira em tons de caramelo. É uma silhueta simples, legível em 32 px ou menos, o que **resolve a pendência** do ícone de corpo inteiro perder detalhe em tamanhos pequenos. Arquivo: `data/icons/io.github.ninjairocode.SnowLauncher.svg`.
 
-**Snow de corpo inteiro (o ícone atual vira ilustração):** boxer branco sentado num montinho de neve, mancha caramelo no olho esquerdo, piscadinha no olho direito, sorriso torto com dentinho, chapéu de mago azul com lua dourada e cajado com um floco de neve azul na ponta. Traço suave, cores chapadas, sem fundo. Usado nas telas grandes, abaixo.
+**Snow de corpo inteiro (o primeiro ícone, agora ilustração em `data/illustrations/snow-wizard.svg`):** boxer branco sentado num montinho de neve, mancha caramelo no olho esquerdo, piscadinha no olho direito, sorriso torto com dentinho, chapéu de mago azul com lua dourada e cajado com um floco de neve azul na ponta. Traço suave, cores chapadas, sem fundo. Usado nas telas grandes, abaixo.
 
 **Onde a casinha aparece:**
 
 | Lugar | Ilustração |
 |---|---|
-| Tela de progresso (inicialização, seção 5) | O Snow caminha até a casinha e **uma janelinha acende por etapa**: "Preparando o ambiente…", "O Battle.net está iniciando…", "Pronto". Floquinhos caindo |
-| Tela vazia (nenhum jogo) | A casinha com a porta aberta e ninguém dentro: "Nenhum jogo ainda" |
-| Tela de erro | A casinha com a luz apagada e o Snow do lado de fora, com o diagnóstico e a correção sugerida |
-| "Sobre" | O Snow inteiro, de mago, sentado na frente da casinha, com a dedicatória |
+| Tela de progresso (inicialização, seção 5) | O Snow espiando pela porta e **três luzinhas no contorno do telhado que acendem uma por etapa**: "Preparando o ambiente…", "O Battle.net está iniciando…", "Pronto" (`progress-1.svg` a `progress-3.svg`). Casinha de cachorro não tem janela, por isso luzinhas |
+| Tela vazia (nenhum jogo) | A casinha com a porta aberta, ninguém dentro e a tigelinha do lado: "Nenhum jogo ainda" (`empty.svg`) |
+| Tela de erro | A casinha apagada e o Snow do lado de fora com um "?", com o diagnóstico e a correção sugerida (`error.svg`) |
+| "Sobre" | O Snow inteiro, de mago, ao lado da casinha, com a dedicatória (`about.svg`) |
 | README e site | Ícone no topo; o Snow e a casinha como ilustração principal |
 
 **Depois (ideia, não compromisso):** uma janelinha de abertura recortada em formato de casinha enquanto o Battle.net inicia. Só quando houver GUI para testar as limitações do Wayland com janelas especiais.
 
-**Pendências:** desenhar o ícone novo (cabeça na porta) e a versão simbólica monocromática para a barra do GNOME (v0.6).
+**Arquivos:** ícone em `data/icons/`; ilustrações em `data/illustrations/`, geradas por `data/illustrations/generate.py` a partir das peças compartilhadas (a casinha e o Snow espiando, tirados do ícone, e o Snow de corpo inteiro). Ao mudar uma peça, rodar o gerador para manter tudo coerente.
+
+**Pendências:** a versão simbólica monocromática do ícone, para a barra do GNOME (v0.6). Em 16 px o ícone colorido fica só com a forma da casinha, o que é esperado nesse tamanho.
 
 **Paleta da marca (tirada do ícone):**
 
@@ -600,7 +612,7 @@ Assisted-by: Claude (Anthropic)
 | **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda | Parcial: E4 em parte, mais as observações O1–O4 |
 | **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso de conexão perdida, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` | **Quase pronta** (ver 12.1) |
 | **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão (Windows 11, **escala automática**), opções globais de **MangoHud e GameMode** | Não começou; o E6 validou o caminho (O6) |
-| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar", tela de progresso de inicialização com o Snow animado, configurações, notificações, portal Background | Não começou |
+| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar" e os **ícones dos jogos tirados dos executáveis**, tela de progresso de inicialização com o Snow e as luzinhas, configurações, notificações, portal Background, **item próprio na bandeja** substituindo o ícone borrado do Battle.net (E9) | Não começou; identidade visual desenhada |
 | **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções | Não começou |
 | **v0.5** | Gamescope por jogo, MangoHud por jogo, perfis isolados por jogo, escolha do Proton (pastas da Steam/ProtonPlus) com backup do prefixo | Não começou |
 | **v0.6** | Exportar diagnóstico, internacionalização (pt-BR e en), ícone simbólico, polimento | Não começou |
@@ -641,6 +653,7 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 | E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? | **Respondido** (O6): o instalador não trava (~78 s); o "Localizar jogo" reaproveitou os 49 GB; o jogo roda em `G:`; a loja abre com Windows 11. Testado com `G:` apontando para a pasta existente, sem mover |
 | E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? | Pendente |
 | E8 | DPI do Wine igual ao `Xft.dpi` do desktop (192 com GNOME a 125%) contra 144 e 96 | O Battle.net e o instalador ficam do mesmo tamanho que os outros aplicativos? Qual é o melhor padrão automático? | **Validado no GNOME 125%** (O7): `Xft.dpi` (192) ficou ideal. Faltam outras escalas, KDE, X11 e vários monitores |
+| E9 | Esconder o ícone do Battle.net na bandeja (Wine/Battle.net) e reabrir a janela por fora (rodar o `Battle.net.exe` de novo com ele já aberto) | Dá para esconder? A janela volta quando o Battle.net está só na bandeja? | Pendente |
 
 ## 14 – Riscos
 
