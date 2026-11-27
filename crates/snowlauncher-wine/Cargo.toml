@@ -8,11 +8,20 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+authenticode = { version = "0.6", features = ["object", "std"] }
+cms = "0.2"
+const-oid = "0.9"
+der = "0.7"
 directories = "6.0.0"
 fs4 = "1.1.0"
+object = { version = "0.39", default-features = false, features = ["read_core", "pe", "std"] }
+ring = "0.17.14"
+sha2 = "0.10"
 snowlauncher-core = { version = "0.1.0", path = "../snowlauncher-core" }
+spki = "0.7"
 thiserror = "2"
 toml = "1.2.3"
+x509-cert = { version = "0.2", features = ["pem"] }
 
 [lints]
 workspace = true
