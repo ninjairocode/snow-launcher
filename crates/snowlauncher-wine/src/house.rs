@@ -307,6 +307,12 @@ pub fn unique_backup_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
     path
 }
 
+/// Where prefix backups live: `backups/` next to `prefixes/`, on the
+/// prefix's own disk so copies can use reflink.
+pub fn prefix_backup_dir(prefix: &Path) -> Option<PathBuf> {
+    prefix.parent()?.parent().map(|data| data.join("backups"))
+}
+
 /// Prefix backups in `dir` (`prefix-*` folders), newest first.
 pub fn prefix_backups(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {

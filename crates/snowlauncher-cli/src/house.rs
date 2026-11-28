@@ -465,13 +465,9 @@ pub fn runtime_set(name: &str, dry_run: bool, out: &mut impl io::Write) -> Resul
     Ok(())
 }
 
-/// Where prefix backups live: next to `prefixes/`, on the prefix's disk.
+/// Where prefix backups live (see [`executor::prefix_backup_dir`]).
 fn prefix_backup_dir(prefix: &Path) -> Result<PathBuf> {
-    prefix
-        .parent()
-        .and_then(Path::parent)
-        .map(|data| data.join("backups"))
-        .context("the house's prefix has no parent folder")
+    executor::prefix_backup_dir(prefix).context("the house's prefix has no parent folder")
 }
 
 /// `snowctl house restore-prefix`: lists the prefix backups, or puts one

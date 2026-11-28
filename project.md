@@ -352,7 +352,7 @@ gamemode = false   # Feral GameMode enquanto um jogo roda
 
 - **MangoHud** via `MANGOHUD=1` no ambiente com que o Snow inicia o Battle.net: os jogos abertos por ele herdam (E15, O16) e usam a configuração do próprio usuário. O Battle.net não carrega o overlay, então não precisa de `blacklist`. Vale na próxima vez que o Battle.net abrir; não dá para ligar por jogo. **Feito.**
 - **GameMode** pelo `snowd`: quando um jogo abre, ele registra **só o processo do jogo** no GameMode pelo D-Bus (`RegisterGameByPID`), e o GameMode o solta quando o jogo fecha. Sem `gamemoderun` nem `LD_PRELOAD`, que no contêiner do umu seriam um problema, e sem modo jogo no Battle.net. O `snowd` acompanha a opção no `config.toml` enquanto roda: desligar solta o jogo na hora. **Feito.**
-- **Na janela:** Preferências → Performance, com uma chave para cada. A chave grava só aquela linha do `config.toml` (comentários e o resto do arquivo ficam como estão), com backup antes; fica desabilitada se a ferramenta não estiver instalada.
+- **Na janela:** Preferências → Performance, com uma chave para cada. Em Preferências → House ficam a escolha do Proton (com backup do prefixo; recusada com a casinha em uso) e a chave de esconder o ícone do Battle.net (E14). A chave grava só aquela linha do `config.toml` (comentários e o resto do arquivo ficam como estão), com backup antes; fica desabilitada se a ferramenta não estiver instalada.
 - Se a opção estiver ligada e a ferramenta não estiver instalada, o Snow avisa (`doctor`, barra de status) em vez de falhar.
 
 ### Um prefixo por jogo ou um para todos?
