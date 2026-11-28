@@ -14,3 +14,4 @@ pub mod prefix;
 pub mod procfs;
 pub mod runtime;
 pub mod signature;
+pub mod user_service;

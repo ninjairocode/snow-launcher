@@ -28,7 +28,7 @@ use snowlauncher_wine::house::{
 };
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 use tokio::sync::{mpsc, watch};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
@@ -44,6 +44,9 @@ const ICON_SVG: &[u8] =
 /// Games are reread this often: it means reading Battle.net's logs.
 const GAMES_EVERY: Duration = Duration::from_secs(30);
 const LAUNCHER_BINARY: &str = "snow-launcher";
+/// The window's GApplication, on the session bus.
+const LAUNCHER_APP_ID: &str = "io.github.ninjairocode.SnowLauncher";
+const LAUNCHER_APP_PATH: &str = "/io/github/ninjairocode/SnowLauncher";
 
 struct Item {
     theme_path: String,
@@ -313,14 +316,44 @@ struct HouseGames {
 
 /// Shows the tray item until `snowd` stops. Never fails: without a tray
 /// `snowd` still does everything else, so problems are only logged.
+/// Shows the tray item until `snowd` stops. Returns only when the user
+/// picks "Quit Snow Launcher" (after asking the window to close too).
+/// Never fails: without a tray `snowd` still does everything else, so
+/// problems are only logged.
 pub async fn run(session_bus: &zbus::Connection, status: watch::Receiver<Status>) {
-    if let Err(error) = serve(session_bus, status).await {
-        warn!(error = format!("{error:#}"), "no tray item");
+    match serve(session_bus, status).await {
+        Ok(true) => {
+            close_window(session_bus).await;
+            return;
+        }
+        Ok(false) => warn!("the tray item stopped"),
+        Err(error) => warn!(error = format!("{error:#}"), "no tray item"),
     }
     std::future::pending::<()>().await;
 }
 
-async fn serve(bus: &zbus::Connection, mut status: watch::Receiver<Status>) -> Result<()> {
+/// Asks Snow's window, if open, to close: its `quit` action, through
+/// GApplication's standard `org.gtk.Actions` interface.
+async fn close_window(bus: &zbus::Connection) {
+    let no_parameters: Vec<zbus::zvariant::Value<'_>> = Vec::new();
+    let no_data: HashMap<&str, zbus::zvariant::Value<'_>> = HashMap::new();
+    let result = bus
+        .call_method(
+            Some(LAUNCHER_APP_ID),
+            LAUNCHER_APP_PATH,
+            Some("org.gtk.Actions"),
+            "Activate",
+            &("quit", no_parameters, no_data),
+        )
+        .await;
+    // Not open is the usual case: nothing to close.
+    if let Err(error) = result {
+        debug!(%error, "the window was not asked to close");
+    }
+}
+
+/// `Ok(true)`: the user asked to quit Snow.
+async fn serve(bus: &zbus::Connection, mut status: watch::Receiver<Status>) -> Result<bool> {
     let theme_path = install_icon().context("could not write the tray icon")?;
     let house = read_house_games().await;
     let current = status.borrow_and_update().clone();
@@ -354,9 +387,9 @@ async fn serve(bus: &zbus::Connection, mut status: watch::Receiver<Status>) -> R
         .with_context(|| format!("could not take the D-Bus name {name}"))?;
 
     tokio::select! {
-        result = keep_registered(bus, &name) => result,
-        result = follow(bus, status, house) => result,
-        () = run_actions(bus, requests) => Ok(()),
+        result = keep_registered(bus, &name) => result.map(|()| false),
+        result = follow(bus, status, house) => result.map(|()| false),
+        () = run_actions(bus, requests) => Ok(true),
     }
 }
 
@@ -491,12 +524,13 @@ async fn read_house_games() -> HouseGames {
 }
 
 /// Runs the clicked actions one at a time; failures become a desktop
-/// notification.
+/// notification. Returns when the user picks "Quit Snow Launcher".
 async fn run_actions(bus: &zbus::Connection, mut requests: mpsc::UnboundedReceiver<TrayAction>) {
     let mut notifier = DesktopNotifier::new(bus.clone());
     while let Some(action) = requests.recv().await {
         info!(?action, "tray action");
         let result = match &action {
+            TrayAction::QuitSnow => return,
             TrayAction::OpenLauncher => open_launcher().await,
             TrayAction::OpenBattlenet => battlenet(Vec::new()).await,
             TrayAction::Play { code, .. } => play(code.clone()).await,

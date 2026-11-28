@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
         result = watch_sleep(&mut sleep_monitor, &mut resume_watcher) => result?,
         result = watch_games(&game_table, prefix.path(), &mut game_guard, &mut connections, &mut gamemode, &status_tx, GAME_POLL_INTERVAL) => result?,
         result = dbus::publish(&session_bus, status_rx) => result?,
-        () = tray::run(&session_bus, tray_status) => {}
+        () = tray::run(&session_bus, tray_status) => info!("quit from the tray menu, stopping"),
         _ = tokio::signal::ctrl_c() => info!("interrupted, stopping"),
         _ = sigterm.recv() => info!("received SIGTERM, stopping"),
     }

@@ -423,10 +423,12 @@ O ícone que o Battle.net põe na bandeja fica **pequeno e borrado**: o Battle.n
   | Jogar ▸ | Um item por jogo instalado, com o ícone dele, abrindo direto (`--exec="launch …"`) |
   | Abrir Snow Launcher | A janela principal |
   | Diagnóstico | O mesmo do `snowctl doctor`, em janela |
-  | Sair do Battle.net | Fecha o Battle.net e o Agent de forma limpa, **nunca** um jogo aberto |
+  | Sair do Battle.net | Fecha o Battle.net e o Agent de forma limpa, **nunca** um jogo aberto. Só aparece com o Battle.net aberto |
+  | Sair do Snow Launcher | Encerra o `snowd` (o ícone some) e a janela. O Battle.net e os jogos continuam; sem o Snow, ficam sem as proteções (suspensão, aviso de conexão). Abrir a janela liga o Snow de novo |
 
 - **Esconder o item do Battle.net:** **feito** (E14, O14). A política do Windows `NoTrayItemsDisplay` (em `HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer`), que o `explorer.exe` do Wine respeita, tira da bandeja os ícones dos programas da casinha. A condição de segurança vem do E9: rodar o `Battle.net.exe` de novo traz a janela de volta, e é isso que o "Abrir Battle.net" do Snow faz. Comando: `snowctl house battlenet-icon hide|show|status`, com `--dry-run`, backup da chave e conferência por `reg query`. **Padrão em toda casinha nova:** o `house create` já esconde o ícone (passo conferido por `reg query`); quem quiser o ícone de volta usa as Preferências ou o `show`.
-- **Quem mostra o item** (a decidir na v0.3): o `snowd`, que já roda sempre como serviço e mostraria o item desde o login, ou a GUI rodando em segundo plano.
+- **Quem mostra o item:** o `snowd` (decidido na v0.3).
+- **Início com a sessão:** "Start Snow at login" nas Preferências (`systemctl --user enable/disable snowd.service`), ligado por padrão. Desligado, nada do Snow roda até a janela ser aberta: **a janela inicia o `snowd`** quando ele está instalado e parado (também depois de "Sair do Snow Launcher").
 - Sem bandeja (GNOME sem a extensão AppIndicator), valem o portal Background e as notificações.
 - Usa StatusNotifierItem pelo D-Bus: nativo no KDE, e no GNOME com a extensão AppIndicator. **Validado no E12** (O12), com `zbus`, sem biblioteca extra:
   - o ícone vai **por nome** (`IconName`) com um `IconThemePath` próprio, e o SVG fica **solto na raiz** desse caminho. Numa estrutura `hicolor/…` sem `index.theme`, a extensão mostra três pontinhos. Assim o ícone é vetor e fica nítido a 192 DPI;
