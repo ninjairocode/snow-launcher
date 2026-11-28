@@ -24,9 +24,14 @@ use snowlauncher_wine::house::{battlenet_pid, open_house, play_game, run_battlen
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 
 use crate::games::GameRow;
+use snowlauncher_core::install::InstallState;
+use snowlauncher_core::installer::OFFICIAL_DOWNLOAD_PAGE;
+use snowlauncher_wine::house::install_battlenet;
+use snowlauncher_wine::installer_cache::choose_installer;
+
 use crate::state::{
     BattlenetView, GameCard, House, Illustration, SessionTracker, StatusRow, game_cards,
-    house_text, open_message, play_message, read_house, status_rows,
+    house_text, install_text, open_message, play_message, read_house, status_rows,
 };
 
 const APP_ID: &str = "io.github.ninjairocode.SnowLauncher";
@@ -55,6 +60,8 @@ struct App {
     games: FactoryVecDeque<GameRow>,
     /// An action is running: buttons are disabled until it ends.
     busy: bool,
+    /// Battle.net being installed from the window: last state and time.
+    install: Option<(InstallState, Duration)>,
 }
 
 impl App {
@@ -66,7 +73,44 @@ impl App {
     }
 
     fn text(&self) -> (Illustration, &'static str, String) {
-        house_text(&self.house, self.battlenet)
+        match (&self.house, &self.install) {
+            (House::NoBattlenet, Some((state, elapsed))) => install_text(state, *elapsed),
+            _ => house_text(&self.house, self.battlenet),
+        }
+    }
+
+    /// "Install Battle.net" and the download page: only for a house
+    /// without Battle.net, and not while installing.
+    fn offers_install(&self) -> bool {
+        self.house == House::NoBattlenet && !self.busy
+    }
+
+    /// Chooses a verified installer and installs Battle.net on a worker
+    /// thread, sending each look at the installation back.
+    fn install(&mut self, sender: &ComponentSender<Self>) {
+        if !self.offers_install() {
+            return;
+        }
+        self.busy = true;
+        self.install = Some((
+            InstallState::Installing { installed_bytes: 0 },
+            Duration::ZERO,
+        ));
+        sender.spawn_command(|out| {
+            let installer = match choose_installer(None) {
+                Ok((path, _)) => path,
+                Err(error) => {
+                    out.emit(CommandOutput::InstallFailed(error.to_string()));
+                    return;
+                }
+            };
+            let result = install_battlenet(&installer, |state, elapsed| {
+                out.emit(CommandOutput::Installing(*state, elapsed));
+            });
+            if let Err(error) = result {
+                out.emit(CommandOutput::InstallFailed(error.to_string()));
+            }
+        });
     }
 
     fn row_title(&self, index: usize) -> &str {
@@ -124,6 +168,8 @@ enum Msg {
     /// The window's scale factor changed (e.g. moved to another monitor).
     Scale(i32),
     Preferences,
+    InstallBattlenet,
+    OpenDownloadPage,
 }
 
 #[derive(Debug)]
@@ -136,6 +182,8 @@ enum CommandOutput {
         cards: Option<Vec<GameCard>>,
     },
     ActionDone(String),
+    Installing(InstallState, Duration),
+    InstallFailed(String),
 }
 
 #[relm4::component]
@@ -204,6 +252,28 @@ impl Component for App {
                                 set_justify: gtk::Justification::Center,
                                 #[watch]
                                 set_label: &model.text().2,
+                            },
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 12,
+                                set_halign: gtk::Align::Center,
+                                set_margin_top: 6,
+                                #[watch]
+                                set_visible: model.offers_install(),
+
+                                gtk::Button {
+                                    set_label: "Install Battle.net",
+                                    add_css_class: "suggested-action",
+                                    add_css_class: "pill",
+                                    set_tooltip_text: Some("Uses Blizzard's installer from Downloads, or the verified copy Snow kept"),
+                                    connect_clicked => Msg::InstallBattlenet,
+                                },
+                                gtk::Button {
+                                    set_label: "Open download page",
+                                    add_css_class: "pill",
+                                    set_tooltip_text: Some("Download the installer in the browser; Snow finds it in Downloads"),
+                                    connect_clicked => Msg::OpenDownloadPage,
+                                },
                             },
                             gtk::ListBox {
                                 add_css_class: "boxed-list",
@@ -282,6 +352,7 @@ impl Component for App {
             cards: Vec::new(),
             games,
             busy: false,
+            install: None,
         };
         let games_list = model.games.widget();
         let widgets = view_output!();
@@ -364,6 +435,17 @@ impl Component for App {
     fn update(&mut self, message: Msg, sender: ComponentSender<Self>, root: &Self::Root) {
         match message {
             Msg::Preferences => preferences::dialog().present(Some(root)),
+            Msg::InstallBattlenet => self.install(&sender),
+            Msg::OpenDownloadPage => {
+                // The browser downloads it, not Snow.
+                let opened = gtk::gio::AppInfo::launch_default_for_uri(
+                    OFFICIAL_DOWNLOAD_PAGE,
+                    gtk::gio::AppLaunchContext::NONE,
+                );
+                if let Err(error) = opened {
+                    eprintln!("snow-launcher: could not open {OFFICIAL_DOWNLOAD_PAGE}: {error}");
+                }
+            }
             Msg::OpenBattlenet => self.act(Job::OpenBattlenet, &sender),
             Msg::Scale(scale) => {
                 if scale != self.art.scale {
@@ -408,6 +490,26 @@ impl Component for App {
                     drop(guard);
                     self.cards = cards;
                 }
+            }
+            CommandOutput::Installing(state, elapsed) => {
+                self.install = Some((state, elapsed));
+                if !matches!(state, InstallState::Installing { .. }) {
+                    self.busy = false;
+                    if state == InstallState::Done {
+                        self.install = None;
+                        self.house = read_house();
+                    }
+                }
+            }
+            CommandOutput::InstallFailed(text) => {
+                self.busy = false;
+                self.install = None;
+                let toast = adw::Toast::builder()
+                    .title(text)
+                    .use_markup(false)
+                    .timeout(10)
+                    .build();
+                widgets.toasts.add_toast(toast);
             }
             CommandOutput::ActionDone(text) => {
                 self.busy = false;

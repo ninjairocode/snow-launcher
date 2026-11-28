@@ -13,12 +13,11 @@ use anyhow::{Context, Result, ensure};
 use directories::BaseDirs;
 use snowlauncher_core::config::{Config, expand_home};
 use snowlauncher_core::display::{DpiChoice, choose_dpi};
-use snowlauncher_core::house::{BATTLENET_DIR, BATTLENET_EXE, plan_removal};
+use snowlauncher_core::house::{BATTLENET_EXE, plan_removal};
 use snowlauncher_core::house::{
     Existing, HouseInputs, HouseStep, LIBRARY_DRIVE, WINDOWS_VERSION, plan_house,
 };
-use snowlauncher_core::install::{InstallLimits, InstallState, InstallWatch, Observation};
-use snowlauncher_core::process::ProcessRole;
+use snowlauncher_core::install::InstallState;
 use snowlauncher_core::process::{ProcessTable, processes_in_prefix};
 use snowlauncher_wine::desktop::desktop_dpi;
 use snowlauncher_wine::house::{
@@ -171,7 +170,8 @@ pub fn install_battlenet(
     // Only Blizzard's installer, unmodified (project.md, section 5).
     let (installer, report) = crate::installer::choose(installer)?;
     let installer = installer.as_path();
-    let umu_run = find_umu_run()
+    // Checked early, so a dry run already says so.
+    find_umu_run()
         .context("umu-run not found: install umu-launcher (or Lutris, which bundles it)")?;
 
     let mode = if dry_run {
@@ -191,80 +191,45 @@ pub fn install_battlenet(
         return Ok(());
     }
 
-    let log = create_log_path().context("could not determine the state directory")?;
-    let runner = UmuRunner {
-        umu_run,
-        prefix: prefix.clone(),
-        runtime: record.runtime_path.clone(),
-        log,
-        // The installer gets no overlay.
-        extra_env: Vec::new(),
-    };
-    let installer_path = fs::canonicalize(installer)
-        .with_context(|| format!("could not read {}", installer.display()))?;
-    let installer_name = installer_path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    // Not waited for: it keeps running with Battle.net after we are done.
-    let _child = runner
-        .spawn(&[installer_path.as_os_str()])
-        .context("could not start the installer")?;
-
     writeln!(out)?;
-    let started = std::time::Instant::now();
-    let mut watch = InstallWatch::new(InstallLimits::default());
     let mut last_print = None::<std::time::Instant>;
-    let bnet_dir = prefix.join(BATTLENET_DIR);
-    loop {
-        std::thread::sleep(WATCH_EVERY);
-        let processes = ProcfsProcessTable::new()
-            .processes()
-            .context("failed to list processes")?;
-        let ours: Vec<_> = processes_in_prefix(&processes, &prefix).collect();
-        let observation = Observation {
-            elapsed: started.elapsed(),
-            installer_running: ours
-                .iter()
-                .any(|p| p.display_name().eq_ignore_ascii_case(&installer_name)),
-            battlenet_running: ours
-                .iter()
-                .any(|p| ProcessRole::of(p) == ProcessRole::BattleNet),
-            installed_bytes: executor::dir_size(&bnet_dir),
-        };
-        let elapsed = clock(observation.elapsed);
-        match watch.observe(observation) {
-            InstallState::Installing { installed_bytes } => {
-                if last_print.is_none_or(|at| at.elapsed() >= PRINT_EVERY) {
-                    writeln!(
+    let mut printed = Ok(());
+    let state = executor::install_battlenet(installer, |state, elapsed| {
+        if let InstallState::Installing { installed_bytes } = state {
+            if last_print.is_none_or(|at| at.elapsed() >= PRINT_EVERY) {
+                // Stop writing after the first failure; reported below.
+                if printed.is_ok() {
+                    printed = writeln!(
                         out,
-                        "  {elapsed}  installing… {} MB",
+                        "  {}  installing… {} MB",
+                        clock(elapsed),
                         installed_bytes / 1_000_000
-                    )?;
-                    out.flush()?;
-                    last_print = Some(std::time::Instant::now());
+                    )
+                    .and_then(|()| out.flush());
                 }
-            }
-            InstallState::Done => {
-                writeln!(
-                    out,
-                    "  {elapsed}  Battle.net is installed and open.\n\n\
-                     Log in, then use \"Locate the game\" for games already in the \
-                     library (G:)."
-                )?;
-                return Ok(());
-            }
-            InstallState::Stalled => bail_left_open(
-                elapsed,
-                "the installer made no progress for 5 minutes and seems stuck",
-            )?,
-            InstallState::ExitedWithoutBattlenet => {
-                bail_left_open(elapsed, "the installer closed but Battle.net did not open")?
-            }
-            InstallState::TimedOut => {
-                bail_left_open(elapsed, "the installation took more than 30 minutes")?;
+                last_print = Some(std::time::Instant::now());
             }
         }
+    })?;
+    printed?;
+    match state {
+        InstallState::Done => {
+            writeln!(
+                out,
+                "  Battle.net is installed and open.\n\n\
+                 Log in, then use \"Locate the game\" for games already in the \
+                 library (G:)."
+            )?;
+            Ok(())
+        }
+        InstallState::Stalled => {
+            bail_left_open("the installer made no progress for 5 minutes and seems stuck")
+        }
+        InstallState::ExitedWithoutBattlenet => {
+            bail_left_open("the installer closed but Battle.net did not open")
+        }
+        InstallState::TimedOut => bail_left_open("the installation took more than 30 minutes"),
+        InstallState::Installing { .. } => Ok(()),
     }
 }
 
@@ -806,12 +771,12 @@ pub fn play(game: &str, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
 }
 
 /// Stops with an explanation, leaving whatever is open for the user to see.
-fn bail_left_open(elapsed: String, what: &str) -> Result<()> {
+fn bail_left_open(what: &str) -> Result<()> {
     let log = create_log_path()
         .map(|path| path.display().to_string())
         .unwrap_or_default();
     anyhow::bail!(
-        "{elapsed}  {what}. Nothing was closed: check the installer window, \
+        "{what}. Nothing was closed: check the installer window, \
          close it if needed and run this command again (Wine log: {log})."
     )
 }

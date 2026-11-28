@@ -3,83 +3,43 @@
 //! last verified copy, and opening the official download page.
 
 use std::fmt::Write as _;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use snowlauncher_core::house::BATTLENET_PUBLISHER;
-use snowlauncher_core::installer::{OFFICIAL_DOWNLOAD_PAGE, installer_candidates};
+use snowlauncher_core::installer::OFFICIAL_DOWNLOAD_PAGE;
 use snowlauncher_wine::installer_cache::{
-    downloaded_installers, downloads_dir, keep_verified, kept_installer, kept_installer_path,
+    ChooseError, choose_installer, downloaded_installers, downloads_dir, kept_installer,
+    verify_installer,
 };
-use snowlauncher_wine::signature::{
-    Publisher, SignatureError, system_roots, verify_executable, verify_publisher,
-};
+use snowlauncher_wine::signature::{Publisher, SignatureError};
 
 /// Verifies `path` and returns the report, or an error saying why it must
 /// not be run.
 pub fn check(path: &Path) -> Result<String> {
-    let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
-    let roots = system_roots()?;
-    match verify_executable(&bytes, &roots)
-        .and_then(|publisher| verify_publisher(&publisher, BATTLENET_PUBLISHER).map(|()| publisher))
-    {
+    match verify_installer(path) {
         Ok(publisher) => Ok(render_ok(path, &publisher)),
         Err(error) => bail!("{}: do not run it: {error}{}", path.display(), hint(&error)),
     }
 }
 
-/// The installer to run: the named one, or else the newest download that
-/// passes the check, or else the kept copy. A verified download replaces
-/// the kept copy. Returns the path and its check report.
+/// The installer to run (see [`choose_installer`]) and its report.
 pub fn choose(named: Option<&Path>) -> Result<(PathBuf, String)> {
-    let downloads = downloads_dir()
-        .map(|dir| downloaded_installers(&dir))
-        .unwrap_or_default();
-    choose_from(
-        named,
-        &downloads,
-        kept_installer().as_deref(),
-        kept_installer_path().as_deref(),
-        check,
-    )
-}
-
-/// [`choose`] with its inputs and the check given, for tests.
-fn choose_from(
-    named: Option<&Path>,
-    downloads: &[PathBuf],
-    kept: Option<&Path>,
-    keep_to: Option<&Path>,
-    check: impl Fn(&Path) -> Result<String>,
-) -> Result<(PathBuf, String)> {
-    let candidates = installer_candidates(named, downloads, kept);
-    let mut problems = Vec::new();
-    for candidate in &candidates {
-        match check(candidate) {
-            Ok(report) => {
-                if let Some(keep_to) = keep_to {
-                    // Keeping a copy is a convenience: never a reason to fail.
-                    let _ = keep_verified(candidate, keep_to);
-                }
-                return Ok((candidate.clone(), report));
-            }
-            // A named file that fails stops here: nothing else is tried.
-            Err(error) if named.is_some() => return Err(error),
-            Err(error) => problems.push(format!("{error}")),
+    match choose_installer(named) {
+        Ok((path, publisher)) => {
+            let report = render_ok(&path, &publisher);
+            Ok((path, report))
         }
+        Err(ChooseError::Refused { path, source }) => {
+            bail!(
+                "{}: do not run it: {source}{}",
+                path.display(),
+                hint(&source)
+            )
+        }
+        Err(other) => Err(other.into()),
     }
-    if problems.is_empty() {
-        bail!(
-            "no Battle.net installer found: download it from {OFFICIAL_DOWNLOAD_PAGE} \
-             (`snowctl house installer download` opens it) or pass --installer PATH"
-        );
-    }
-    bail!(
-        "no installer passed the check:\n  {}\nDownload it again from {OFFICIAL_DOWNLOAD_PAGE}",
-        problems.join("\n  ")
-    )
 }
 
 /// `snowctl house installer status`.
@@ -154,6 +114,7 @@ fn render_ok(path: &Path, publisher: &Publisher) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn report_names_publisher_and_root() {
@@ -177,56 +138,5 @@ mod tests {
         fs::write(&fake, "not an installer").unwrap();
         let error = check(&fake).unwrap_err().to_string();
         assert!(error.contains("do not run it"), "{error}");
-    }
-
-    /// Accepts files whose content is "good".
-    fn fake_check(path: &Path) -> Result<String> {
-        if fs::read_to_string(path).unwrap_or_default() == "good" {
-            Ok(format!("ok {}", path.display()))
-        } else {
-            bail!("{}: refused", path.display())
-        }
-    }
-
-    #[test]
-    fn the_first_good_download_wins_and_is_kept() {
-        let tmp = tempfile::tempdir().unwrap();
-        let bad = tmp.path().join("Battle.net-Setup (1).exe");
-        let good = tmp.path().join("Battle.net-Setup.exe");
-        fs::write(&bad, "tampered").unwrap();
-        fs::write(&good, "good").unwrap();
-        let keep = tmp.path().join("cache/Battle.net-Setup.exe");
-        let downloads = [bad, good.clone()];
-
-        let (chosen, _) = choose_from(None, &downloads, None, Some(&keep), fake_check).unwrap();
-        assert_eq!(chosen, good);
-        assert_eq!(fs::read_to_string(&keep).unwrap(), "good");
-
-        // Later, with nothing in Downloads, the kept copy is used.
-        let (chosen, _) = choose_from(None, &[], Some(&keep), Some(&keep), fake_check).unwrap();
-        assert_eq!(chosen, keep);
-    }
-
-    #[test]
-    fn a_named_file_that_fails_is_not_replaced_by_another() {
-        let tmp = tempfile::tempdir().unwrap();
-        let named = tmp.path().join("mine.exe");
-        let good = tmp.path().join("Battle.net-Setup.exe");
-        fs::write(&named, "tampered").unwrap();
-        fs::write(&good, "good").unwrap();
-        let keep = tmp.path().join("cache/Battle.net-Setup.exe");
-        let error = choose_from(Some(&named), &[good], None, Some(&keep), fake_check)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("mine.exe: refused"), "{error}");
-        assert!(!keep.exists(), "nothing kept from a refused file");
-    }
-
-    #[test]
-    fn nothing_found_points_to_the_download_page() {
-        let error = choose_from(None, &[], None, None, fake_check)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains(OFFICIAL_DOWNLOAD_PAGE), "{error}");
     }
 }
