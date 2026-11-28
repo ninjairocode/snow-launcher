@@ -9,6 +9,7 @@
 
 mod games;
 mod images;
+mod import_dialog;
 mod preferences;
 mod state;
 
@@ -77,6 +78,20 @@ impl App {
             (House::NoBattlenet, Some((state, elapsed))) => install_text(state, *elapsed),
             _ => house_text(&self.house, self.battlenet),
         }
+    }
+
+    /// Shows `cards` in the games list, rebuilding it only if it changed.
+    fn set_cards(&mut self, cards: Vec<GameCard>) {
+        if cards == self.cards {
+            return;
+        }
+        let mut guard = self.games.guard();
+        guard.clear();
+        for card in &cards {
+            guard.push_back(card.clone());
+        }
+        drop(guard);
+        self.cards = cards;
     }
 
     /// "Install Battle.net" and the download page: only for a house
@@ -170,6 +185,9 @@ enum Msg {
     Preferences,
     InstallBattlenet,
     OpenDownloadPage,
+    ImportGame,
+    /// A game was imported: read the library again.
+    RefreshGames,
 }
 
 #[derive(Debug)]
@@ -184,6 +202,7 @@ enum CommandOutput {
     ActionDone(String),
     Installing(InstallState, Duration),
     InstallFailed(String),
+    Games(Vec<GameCard>),
 }
 
 #[relm4::component]
@@ -315,13 +334,24 @@ impl Component for App {
                                     set_visible: model.row_visible(STATUS_ROWS - 1),
                                 },
                             },
-                            gtk::Label {
-                                add_css_class: "heading",
-                                set_halign: gtk::Align::Start,
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
                                 set_margin_top: 18,
-                                set_label: "Games",
                                 #[watch]
                                 set_visible: model.house.is_ready(),
+
+                                gtk::Label {
+                                    add_css_class: "heading",
+                                    set_halign: gtk::Align::Start,
+                                    set_hexpand: true,
+                                    set_label: "Games",
+                                },
+                                gtk::Button {
+                                    set_label: "Import a game…",
+                                    add_css_class: "flat",
+                                    set_tooltip_text: Some("Copy a game from another launcher (Lutris, Steam…) into Snow's library"),
+                                    connect_clicked => Msg::ImportGame,
+                                },
                             },
                             #[local_ref]
                             games_list -> gtk::ListBox {
@@ -436,6 +466,17 @@ impl Component for App {
         match message {
             Msg::Preferences => preferences::dialog().present(Some(root)),
             Msg::InstallBattlenet => self.install(&sender),
+            Msg::ImportGame => {
+                if let House::Ready { library, .. } = &self.house {
+                    let refresh = sender.input_sender().clone();
+                    import_dialog::dialog(library, move || refresh.emit(Msg::RefreshGames))
+                        .present(Some(root));
+                }
+            }
+            Msg::RefreshGames => {
+                let house = self.house.clone();
+                sender.spawn_oneshot_command(move || CommandOutput::Games(read_games(&house)));
+            }
             Msg::OpenDownloadPage => {
                 // The browser downloads it, not Snow.
                 let opened = gtk::gio::AppInfo::launch_default_for_uri(
@@ -481,14 +522,8 @@ impl Component for App {
                 self.rows = rows;
                 self.house = house;
                 self.battlenet = battlenet;
-                if let Some(cards) = cards.filter(|cards| *cards != self.cards) {
-                    let mut guard = self.games.guard();
-                    guard.clear();
-                    for card in &cards {
-                        guard.push_back(card.clone());
-                    }
-                    drop(guard);
-                    self.cards = cards;
+                if let Some(cards) = cards {
+                    self.set_cards(cards);
                 }
             }
             CommandOutput::Installing(state, elapsed) => {
@@ -501,6 +536,7 @@ impl Component for App {
                     }
                 }
             }
+            CommandOutput::Games(cards) => self.set_cards(cards),
             CommandOutput::InstallFailed(text) => {
                 self.busy = false;
                 self.install = None;
