@@ -13,55 +13,64 @@ use snowlauncher_wine::library::InstalledGame;
 
 // TODO(i18n): translate (pt-BR) once gettext is in place (v0.6).
 
-/// One row of the status list: a title and its current value.
+/// One row of the status list: an icon, a title and its current value,
+/// in the player's words (no daemon names or versions).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusRow {
+    /// A symbolic icon of the GNOME (Adwaita) icon theme.
+    pub icon: &'static str,
     pub title: &'static str,
     pub value: String,
 }
 
 /// The four status rows, from what `snowd` reports.
 pub fn status_rows(daemon: &DaemonState) -> Vec<StatusRow> {
-    let row = |title, value: &str| StatusRow {
+    let row = |icon, title, value: &str| StatusRow {
+        icon,
         title,
         value: value.to_owned(),
     };
+    let snow = |value: &str| vec![row("dialog-warning-symbolic", "Snow", value)];
     let view = match daemon {
         DaemonState::Running(view) => view,
         DaemonState::RunningWithoutInterface { .. } => {
-            return vec![row(
-                "snowd",
-                "running, but too old to report its status (update it)",
-            )];
+            return snow("An older version is running: update Snow Launcher");
         }
         DaemonState::NotRunning => {
-            return vec![row("snowd", "not running (see `snowctl service install`)")];
+            return snow(
+                "Not running: no protection while you play. Install its service with \
+                 `snowctl service install`",
+            );
         }
-        DaemonState::Unknown(_) => return vec![row("snowd", "unknown (could not ask it)")],
+        DaemonState::Unknown(_) => return snow("Could not reach Snow's background service"),
     };
-    let games = if view.running_games.is_empty() {
-        "none".to_owned()
+    let playing = if view.running_games.is_empty() {
+        "Nothing right now".to_owned()
     } else {
         view.running_games.join(", ")
     };
     let suspend = if view.suspend_inhibited {
-        "blocked while playing"
+        "Blocked while you play"
     } else {
-        "allowed"
+        "Allowed"
     };
     let connection = match view.game_connection.parse::<GameConnection>() {
-        Ok(GameConnection::NoGame) => "no game running",
-        Ok(GameConnection::Ok) => "ok",
-        Ok(GameConnection::NetworkDown) => "network is down",
-        Ok(GameConnection::Lost) => "lost: close the game and open it again",
+        Ok(GameConnection::NoGame) => "Checked while a game runs",
+        Ok(GameConnection::Ok) => "Good",
+        Ok(GameConnection::NetworkDown) => "The network is down",
+        Ok(GameConnection::Lost) => "Lost: close the game and open it again",
         // A newer snowd may report states this build does not know.
         Err(_) => view.game_connection.as_str(),
     };
     vec![
-        row("snowd", &format!("running (v{})", view.version)),
-        row("Games", &games),
-        row("Automatic suspend", suspend),
-        row("Game connection", connection),
+        row("security-high-symbolic", "Snow", "Watching over your games"),
+        row("input-gaming-symbolic", "Playing", &playing),
+        row("weather-clear-night-symbolic", "Automatic suspend", suspend),
+        row(
+            "network-transmit-receive-symbolic",
+            "Connection",
+            connection,
+        ),
     ]
 }
 
@@ -180,7 +189,8 @@ pub fn house_text(house: &House, battlenet: BattlenetView) -> (Illustration, &'s
         (House::Missing, _) => (
             Illustration::Empty,
             "No house yet",
-            "Create Snow Launcher's Battle.net house with `snowctl house create`.",
+            "Snow keeps Battle.net in a house of its own. Create it in a terminal with \
+             snowctl house create, then come back here.",
         ),
         (House::NoBattlenet, _) => (
             Illustration::Empty,
@@ -190,7 +200,7 @@ pub fn house_text(house: &House, battlenet: BattlenetView) -> (Illustration, &'s
         (House::Ready { .. }, BattlenetView::Closed) => (
             Illustration::Lights(0),
             "Battle.net is closed",
-            "Open it with the button above, or press Play on a game.",
+            "Open it below, or press Play on a game.",
         ),
         (House::Ready { .. }, BattlenetView::Starting) => (
             Illustration::Lights(1),
@@ -336,10 +346,10 @@ mod tests {
         assert_eq!(
             values,
             [
-                "running (v0.1.0)",
+                "Watching over your games",
                 "World of Warcraft",
-                "blocked while playing",
-                "lost: close the game and open it again",
+                "Blocked while you play",
+                "Lost: close the game and open it again",
             ]
         );
     }

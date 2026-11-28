@@ -124,13 +124,16 @@ fn toast(dialog: &glib::WeakRef<adw::PreferencesDialog>, text: String) {
 
 /// How a Proton shows in the list: its folder, what it really is when the
 /// name does not say it (ProtonPlus' "Latest"), and the default.
+/// Short, so the list's selected value fits in its row:
+/// `GE-Proton11-14-x86_64` shows as `GE-Proton11-14`.
 pub fn runtime_choice_label(runtime: &Runtime, is_default: bool) -> String {
-    let mut label = runtime.name.clone();
-    if !runtime.name.starts_with(&runtime.label) {
-        label.push_str(&format!(" ({})", runtime.label));
-    }
+    let mut label = if runtime.name.starts_with(&runtime.label) {
+        runtime.label.clone()
+    } else {
+        format!("{} ({})", runtime.name, runtime.label)
+    };
     if is_default {
-        label.push_str(" — default");
+        label.push_str(" (default)");
     }
     label
 }
@@ -154,7 +157,8 @@ fn proton_row(dialog: &adw::PreferencesDialog) -> Option<adw::ComboRow> {
     let model = gtk::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
     let row = adw::ComboRow::builder()
         .title("Proton")
-        .subtitle("Switching backs up the house first. Only with Battle.net closed.")
+        // The chosen Proton shows as the subtitle: room for its whole name.
+        .use_subtitle(true)
         .model(&model)
         .selected(u32::try_from(current).ok()?)
         .build();
@@ -384,7 +388,10 @@ pub fn dialog() -> adw::PreferencesDialog {
 
     // Only with a house: there is nothing to set up without one.
     if let Some(proton) = proton_row(&dialog) {
-        let house = adw::PreferencesGroup::builder().title("House").build();
+        let house = adw::PreferencesGroup::builder()
+            .title("House")
+            .description("Switching Proton backs up the house first, and needs Battle.net closed.")
+            .build();
         house.add(&proton);
         house.add(&icon_row(&dialog));
         page.add(&house);
@@ -410,7 +417,7 @@ mod tests {
     fn proton_labels() {
         assert_eq!(
             runtime_choice_label(&runtime("GE-Proton11-14-x86_64", "GE-Proton11-14"), true),
-            "GE-Proton11-14-x86_64 — default"
+            "GE-Proton11-14 (default)"
         );
         assert_eq!(
             runtime_choice_label(&runtime("Proton-GE Latest", "GE-Proton11-14"), false),
