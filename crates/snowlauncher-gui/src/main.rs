@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use relm4::adw::prelude::*;
 use relm4::factory::FactoryVecDeque;
-use relm4::{Component, ComponentParts, ComponentSender, RelmApp, RelmWidgetExt, adw, gtk};
+use relm4::{Component, ComponentParts, ComponentSender, RelmApp, adw, gtk};
 use snowlauncher_wine::battlenet_logs::{newest_session_log, session_stage};
 use snowlauncher_wine::daemon_client::query_async;
 use snowlauncher_wine::game_icon::game_icon;
@@ -129,6 +129,33 @@ impl App {
         });
     }
 
+    /// The illustration's width in logical pixels.
+    fn illustration_width(&self) -> i32 {
+        self.illustration()
+            .map_or(0, |texture| texture.width() / self.art.scale.max(1))
+    }
+
+    fn row_icon(&self, index: usize) -> &str {
+        self.rows.get(index).map_or("", |row| row.icon)
+    }
+
+    /// The main button: open Battle.net, or bring back an open one.
+    fn battlenet_button_label(&self) -> &'static str {
+        if self.battlenet == BattlenetView::Closed {
+            "Open Battle.net"
+        } else {
+            "Show Battle.net"
+        }
+    }
+
+    fn battlenet_button_style(&self) -> &'static [&'static str] {
+        if self.battlenet == BattlenetView::Closed {
+            &["pill", "suggested-action"]
+        } else {
+            &["pill"]
+        }
+    }
+
     fn row_title(&self, index: usize) -> &str {
         self.rows.get(index).map_or("", |row| row.title)
     }
@@ -184,6 +211,7 @@ enum Msg {
     /// The window's scale factor changed (e.g. moved to another monitor).
     Scale(i32),
     Preferences,
+    About,
     InstallBattlenet,
     OpenDownloadPage,
     /// Stop `snowd` and close the window. Battle.net stays open.
@@ -220,18 +248,11 @@ impl Component for App {
     view! {
         adw::ApplicationWindow {
             set_title: Some("Snow Launcher"),
-            set_default_size: (720, 680),
+            set_default_size: (680, 820),
 
             #[wrap(Some)]
             set_content = &adw::ToolbarView {
                 add_top_bar = &adw::HeaderBar {
-                    pack_start = &gtk::Button {
-                        set_label: "Open Battle.net",
-                        set_tooltip_text: Some("Open Battle.net in the house, or bring its window back"),
-                        #[watch]
-                        set_sensitive: model.can_act(),
-                        connect_clicked => Msg::OpenBattlenet,
-                    },
                     pack_end = &gtk::MenuButton {
                         set_icon_name: "open-menu-symbolic",
                         set_tooltip_text: Some("Main menu"),
@@ -248,64 +269,130 @@ impl Component for App {
 
                     #[name = "clamp"]
                     adw::Clamp {
-                        set_maximum_size: 640,
+                        set_maximum_size: 600,
+                        set_tightening_threshold: 400,
 
                         gtk::Box {
                             set_orientation: gtk::Orientation::Vertical,
-                            set_spacing: 12,
-                            set_margin_all: 24,
+                            set_spacing: 30,
+                            set_margin_top: 12,
+                            set_margin_bottom: 30,
+                            set_margin_start: 18,
+                            set_margin_end: 18,
 
-                            gtk::Picture {
-                                set_height_request: ILLUSTRATION_HEIGHT,
-                                set_can_shrink: true,
-                                #[watch]
-                                set_paintable: model.illustration(),
-                                #[watch]
-                                set_visible: model.illustration().is_some(),
-                            },
-                            gtk::Label {
-                                add_css_class: "title-1",
-                                set_wrap: true,
-                                set_justify: gtk::Justification::Center,
-                                #[watch]
-                                set_label: model.text().1,
-                            },
-                            gtk::Label {
-                                add_css_class: "dim-label",
-                                set_wrap: true,
-                                set_justify: gtk::Justification::Center,
-                                #[watch]
-                                set_label: &model.text().2,
-                            },
+                            // The house and Battle.net at a glance, with the
+                            // one thing to do next.
                             gtk::Box {
-                                set_orientation: gtk::Orientation::Horizontal,
-                                set_spacing: 12,
-                                set_halign: gtk::Align::Center,
-                                set_margin_top: 6,
-                                #[watch]
-                                set_visible: model.offers_install(),
+                                set_orientation: gtk::Orientation::Vertical,
+                                set_spacing: 6,
 
-                                gtk::Button {
-                                    set_label: "Install Battle.net",
-                                    add_css_class: "suggested-action",
-                                    add_css_class: "pill",
-                                    set_tooltip_text: Some("Uses Blizzard's installer from Downloads, or the verified copy Snow kept"),
-                                    connect_clicked => Msg::InstallBattlenet,
+                                // The texture has `scale` times the pixels,
+                                // to stay sharp, but GtkPicture takes its
+                                // pixel size as its natural size: the clamp
+                                // keeps it to its size in logical pixels.
+                                adw::Clamp {
+                                    set_unit: adw::LengthUnit::Px,
+                                    #[watch]
+                                    set_maximum_size: model.illustration_width(),
+                                    #[watch]
+                                    set_tightening_threshold: model.illustration_width(),
+                                    set_margin_bottom: 12,
+                                    #[watch]
+                                    set_visible: model.illustration().is_some(),
+
+                                    gtk::Picture {
+                                        set_can_shrink: true,
+                                        #[watch]
+                                        set_paintable: model.illustration(),
+                                    },
+                                },
+                                gtk::Label {
+                                    add_css_class: "title-1",
+                                    set_wrap: true,
+                                    set_justify: gtk::Justification::Center,
+                                    #[watch]
+                                    set_label: model.text().1,
+                                },
+                                gtk::Label {
+                                    add_css_class: "dim-label",
+                                    set_wrap: true,
+                                    set_justify: gtk::Justification::Center,
+                                    #[watch]
+                                    set_label: &model.text().2,
                                 },
                                 gtk::Button {
-                                    set_label: "Open download page",
-                                    add_css_class: "pill",
-                                    set_tooltip_text: Some("Download the installer in the browser; Snow finds it in Downloads"),
-                                    connect_clicked => Msg::OpenDownloadPage,
+                                    set_halign: gtk::Align::Center,
+                                    set_margin_top: 18,
+                                    set_tooltip_text: Some("Open Battle.net in the house, or bring its window back"),
+                                    #[watch]
+                                    set_label: model.battlenet_button_label(),
+                                    #[watch]
+                                    set_css_classes: model.battlenet_button_style(),
+                                    #[watch]
+                                    set_visible: model.house.is_ready(),
+                                    #[watch]
+                                    set_sensitive: model.can_act(),
+                                    connect_clicked => Msg::OpenBattlenet,
+                                },
+                                gtk::Box {
+                                    set_orientation: gtk::Orientation::Horizontal,
+                                    set_spacing: 12,
+                                    set_halign: gtk::Align::Center,
+                                    set_margin_top: 18,
+                                    #[watch]
+                                    set_visible: model.offers_install(),
+
+                                    gtk::Button {
+                                        set_label: "Install Battle.net",
+                                        add_css_class: "suggested-action",
+                                        add_css_class: "pill",
+                                        set_tooltip_text: Some("Uses Blizzard's installer from Downloads, or the verified copy Snow kept"),
+                                        connect_clicked => Msg::InstallBattlenet,
+                                    },
+                                    gtk::Button {
+                                        set_label: "Open Download Page",
+                                        add_css_class: "pill",
+                                        set_tooltip_text: Some("Download the installer in the browser; Snow finds it in Downloads"),
+                                        connect_clicked => Msg::OpenDownloadPage,
+                                    },
                                 },
                             },
-                            gtk::ListBox {
-                                add_css_class: "boxed-list",
-                                set_selection_mode: gtk::SelectionMode::None,
-                                set_margin_top: 18,
+
+                            adw::PreferencesGroup {
+                                set_title: "Games",
+                                #[watch]
+                                set_visible: model.house.is_ready(),
+                                #[wrap(Some)]
+                                set_header_suffix = &gtk::Button {
+                                    add_css_class: "flat",
+                                    set_valign: gtk::Align::Center,
+                                    set_tooltip_text: Some("Copy a game from another launcher (Lutris, Steam…) into Snow's library"),
+                                    connect_clicked => Msg::ImportGame,
+
+                                    adw::ButtonContent {
+                                        set_icon_name: "list-add-symbolic",
+                                        set_label: "Import",
+                                    },
+                                },
+
+                                #[local_ref]
+                                games_list -> gtk::ListBox {
+                                    add_css_class: "boxed-list",
+                                    set_selection_mode: gtk::SelectionMode::None,
+                                    #[watch]
+                                    set_sensitive: model.can_act(),
+                                },
+                            },
+
+                            adw::PreferencesGroup {
+                                set_title: "Status",
 
                                 adw::ActionRow {
                                     set_use_markup: false,
+                                    add_prefix = &gtk::Image {
+                                        #[watch]
+                                        set_icon_name: Some(model.row_icon(0)),
+                                    },
                                     #[watch]
                                     set_title: model.row_title(0),
                                     #[watch]
@@ -313,6 +400,10 @@ impl Component for App {
                                 },
                                 adw::ActionRow {
                                     set_use_markup: false,
+                                    add_prefix = &gtk::Image {
+                                        #[watch]
+                                        set_icon_name: Some(model.row_icon(1)),
+                                    },
                                     #[watch]
                                     set_title: model.row_title(1),
                                     #[watch]
@@ -322,6 +413,10 @@ impl Component for App {
                                 },
                                 adw::ActionRow {
                                     set_use_markup: false,
+                                    add_prefix = &gtk::Image {
+                                        #[watch]
+                                        set_icon_name: Some(model.row_icon(2)),
+                                    },
                                     #[watch]
                                     set_title: model.row_title(2),
                                     #[watch]
@@ -331,6 +426,10 @@ impl Component for App {
                                 },
                                 adw::ActionRow {
                                     set_use_markup: false,
+                                    add_prefix = &gtk::Image {
+                                        #[watch]
+                                        set_icon_name: Some(model.row_icon(STATUS_ROWS - 1)),
+                                    },
                                     #[watch]
                                     set_title: model.row_title(STATUS_ROWS - 1),
                                     #[watch]
@@ -338,34 +437,6 @@ impl Component for App {
                                     #[watch]
                                     set_visible: model.row_visible(STATUS_ROWS - 1),
                                 },
-                            },
-                            gtk::Box {
-                                set_orientation: gtk::Orientation::Horizontal,
-                                set_margin_top: 18,
-                                #[watch]
-                                set_visible: model.house.is_ready(),
-
-                                gtk::Label {
-                                    add_css_class: "heading",
-                                    set_halign: gtk::Align::Start,
-                                    set_hexpand: true,
-                                    set_label: "Games",
-                                },
-                                gtk::Button {
-                                    set_label: "Import a game…",
-                                    add_css_class: "flat",
-                                    set_tooltip_text: Some("Copy a game from another launcher (Lutris, Steam…) into Snow's library"),
-                                    connect_clicked => Msg::ImportGame,
-                                },
-                            },
-                            #[local_ref]
-                            games_list -> gtk::ListBox {
-                                add_css_class: "boxed-list",
-                                set_selection_mode: gtk::SelectionMode::None,
-                                #[watch]
-                                set_visible: model.house.is_ready(),
-                                #[watch]
-                                set_sensitive: model.can_act(),
                             },
                         },
                     },
@@ -392,6 +463,7 @@ impl Component for App {
         let games_list = model.games.widget();
         let widgets = view_output!();
         add_app_actions(&sender);
+        install_app_icon(&root);
 
         // With "Start Snow at login" off, or after "Quit Snow Launcher",
         // opening the window is what starts Snow again.
@@ -416,6 +488,9 @@ impl Component for App {
             .css_classes(["dim-label"])
             .build();
         widgets.games_list.set_placeholder(Some(&placeholder));
+
+        #[cfg(debug_assertions)]
+        screenshot_for_development(&root);
 
         // `adw::Clamp` measures in "sp" (follows the text size), converted
         // with GTK's text DPI. Without a settings service (minimal window
@@ -483,6 +558,7 @@ impl Component for App {
     fn update(&mut self, message: Msg, sender: ComponentSender<Self>, root: &Self::Root) {
         match message {
             Msg::Preferences => preferences::dialog().present(Some(root)),
+            Msg::About => about_dialog().present(Some(root)),
             Msg::QuitSnow => {
                 sender.spawn_oneshot_command(|| {
                     let result = match user_service::is_active() {
@@ -627,7 +703,7 @@ fn read_games(house: &House) -> Vec<GameCard> {
 }
 
 /// Illustration height in the window, in logical pixels.
-const ILLUSTRATION_HEIGHT: i32 = 240;
+const ILLUSTRATION_HEIGHT: i32 = 200;
 
 /// The illustrations, rasterized for one scale factor.
 struct Illustrations {
@@ -659,10 +735,99 @@ fn texture(name: &str, bytes: &'static [u8], scale: i32) -> Option<gtk::gdk::Tex
     images::svg_texture(name, bytes, ILLUSTRATION_HEIGHT * scale)
 }
 
+/// Development aid, only in debug builds: with `SNOW_SCREENSHOT=file.png`,
+/// the window draws itself into that PNG after 6 seconds (and every 6 s,
+/// up to a minute), so its look can be checked without a screen grab.
+#[cfg(debug_assertions)]
+fn screenshot_for_development(window: &adw::ApplicationWindow) {
+    let Some(path) = std::env::var_os("SNOW_SCREENSHOT") else {
+        return;
+    };
+    // `SNOW_SCREENSHOT_SHOW=about|preferences` opens that dialog first.
+    if let Ok(which) = std::env::var("SNOW_SCREENSHOT_SHOW") {
+        let parent = window.clone();
+        gtk::glib::timeout_add_seconds_local_once(2, move || match which.as_str() {
+            "about" => about_dialog().present(Some(&parent)),
+            "preferences" => preferences::dialog().present(Some(&parent)),
+            _ => {}
+        });
+    }
+    let window = window.clone();
+    let mut shots = 0;
+    gtk::glib::timeout_add_seconds_local(6, move || {
+        shots += 1;
+        let paintable = gtk::WidgetPaintable::new(Some(&window));
+        let (width, height) = (window.width(), window.height());
+        let snapshot = gtk::Snapshot::new();
+        paintable.snapshot(&snapshot, f64::from(width), f64::from(height));
+        let saved = snapshot
+            .to_node()
+            .zip(window.native())
+            .and_then(|(node, native)| {
+                let texture = native.renderer()?.render_texture(&node, None);
+                texture.save_to_png(&path).ok()
+            });
+        if saved.is_none() {
+            eprintln!("snow-launcher: could not save the screenshot");
+        }
+        if shots < 10 {
+            gtk::glib::ControlFlow::Continue
+        } else {
+            gtk::glib::ControlFlow::Break
+        }
+    });
+}
+
+const APP_ICON_SVG: &[u8] =
+    include_bytes!("../../../data/icons/io.github.ninjairocode.SnowLauncher.svg");
+
+/// Makes Snow's icon findable by name (the window, the About dialog):
+/// until a package installs it in the icon theme, the embedded SVG is
+/// written to a folder of our own under `$XDG_RUNTIME_DIR`, added to the
+/// theme's search path. A failure only means no icon.
+fn install_app_icon(window: &adw::ApplicationWindow) {
+    let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(runtime).join("snow-launcher/gui-icons");
+    let file = dir.join(format!("{APP_ID}.svg"));
+    let written = std::fs::create_dir_all(&dir)
+        .and_then(|()| snowlauncher_wine::house::write_atomic(&file, APP_ICON_SVG));
+    if written.is_err() {
+        return;
+    }
+    gtk::IconTheme::for_display(&gtk::prelude::WidgetExt::display(window)).add_search_path(&dir);
+    gtk::Window::set_default_icon_name(APP_ID);
+}
+
+/// "About Snow Launcher".
+fn about_dialog() -> adw::AboutDialog {
+    let about = adw::AboutDialog::builder()
+        .application_name("Snow Launcher")
+        .application_icon(APP_ID)
+        .version(env!("CARGO_PKG_VERSION"))
+        .developer_name("ninjairocode")
+        .comments(
+            "Keeps the official Battle.net app well configured and watched over on Linux.\n\n\
+             An independent project, not affiliated with, endorsed or sponsored by \
+             Blizzard Entertainment.",
+        )
+        .website("https://github.com/ninjairocode/snow-launcher")
+        .issue_url("https://github.com/ninjairocode/snow-launcher/issues")
+        .license_type(gtk::License::Gpl30)
+        .developers(["ninjairocode"])
+        .artists(["ninjairocode (Snow, the boxer in the wizard hat)"])
+        .build();
+    // GPL 3.0 above means "version 3 or later", as in Cargo.toml.
+    about.add_acknowledgement_section(Some("Developed with the help of"), &["Claude (Anthropic)"]);
+    about
+}
+
 /// The header's menu.
 fn main_menu() -> gtk::gio::Menu {
     let menu = gtk::gio::Menu::new();
     menu.append(Some("Preferences"), Some("app.preferences"));
+    menu.append(Some("About Snow Launcher"), Some("app.about"));
     let quit = gtk::gio::Menu::new();
     quit.append(Some("Quit Snow Launcher"), Some("app.quit-snow"));
     menu.append_section(None, &quit);
@@ -672,6 +837,7 @@ fn main_menu() -> gtk::gio::Menu {
 /// The menu's actions, as messages to the window.
 fn add_app_actions(sender: &ComponentSender<App>) {
     add_app_action(sender, "preferences", || Msg::Preferences);
+    add_app_action(sender, "about", || Msg::About);
     add_app_action(sender, "quit-snow", || Msg::QuitSnow);
 }
 

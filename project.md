@@ -665,7 +665,7 @@ Assisted-by: Claude (Anthropic)
 | **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda | Parcial: E4 em parte, mais as observações O1–O4 |
 | **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso de conexão perdida, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` | **Quase pronta** (ver 12.1) |
 | **v0.2** | Casinha própria: criar prefixo via umu, Proton escolhido, fixado e com volta segura, instalar Battle.net (instalador verificado, arquivo local ou importação de jogos, ver seção 5), aplicar ajustes padrão (Windows 11, **escala automática**), opções globais de **MangoHud e GameMode** | **Pronta** (ver 12.2) |
-| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar" e os **ícones dos jogos tirados dos executáveis**, tela de progresso de inicialização com o Snow e as luzinhas, configurações, notificações, **bandeja só com o Snow**, controle do Battle.net validado (E5, E9, E10) | **Quase pronta** (ver 12.3); falta o polimento visual |
+| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar" e os **ícones dos jogos tirados dos executáveis**, tela de progresso de inicialização com o Snow e as luzinhas, configurações, notificações, **bandeja só com o Snow**, controle do Battle.net validado (E5, E9, E10) | **Pronta** (ver 12.3) |
 | **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções | Não começou |
 | **v0.5** | Gamescope por jogo, perfis isolados por jogo (MangoHud por jogo não dá: o jogo herda o ambiente do Battle.net, O16) | Não começou. A escolha do Proton com backup do prefixo veio antes, na v0.2 |
 | **v0.6** | Exportar diagnóstico, internacionalização (pt-BR e en), polimento | Não começou. O ícone simbólico saiu do plano: o mantenedor prefere o colorido, e ele ficou nítido na bandeja (E12) |
@@ -703,7 +703,9 @@ Assisted-by: Claude (Anthropic)
 
 **Pronto:** janela com o estado do `snowd` e da casinha, as luzinhas da inicialização (lidas do log do Battle.net), os jogos com o ícone tirado do próprio executável e "Play", "Open Battle.net", instalar o Battle.net e importar jogos pela janela, Preferências (MangoHud, GameMode, Proton, ícone do Battle.net, iniciar com a sessão, abrir o Battle.net quando o Snow inicia) e "Quit Snow Launcher"; bandeja só com o Snow (E12, E14), com "Open Snow Launcher", "Open Battle.net", "Play", "Quit Battle.net" (só com ele aberto) e "Quit Snow Launcher"; ilustrações nítidas em qualquer escala; base mínima GTK 4.14 e libadwaita 1.5 (Ubuntu 24.04, recurso `gnome_46` do Relm4).
 
-**Pendente:** o polimento visual da janela (deixado de propósito para o fim). O portal Background deixou de ser necessário: o `snowd` roda como serviço e a bandeja é dele.
+**Polimento visual (feito):** o topo mostra a casinha, o estado do Battle.net e **uma** ação principal em destaque ("Open Battle.net", ou "Show Battle.net" com ele aberto); os jogos vêm logo abaixo, num grupo com "Import" no cabeçalho; o estado fica no fim, em linguagem de quem joga e com ícones; cabeçalho só com o título e o menu (Preferences, About, Quit Snow Launcher); diálogo "About" com o aviso de não afiliação à Blizzard e o crédito à IA. As ilustrações ficam no tamanho lógico em qualquer escala (a textura tem o dobro de pixels com escala 2, e o `GtkPicture` usaria esses pixels como tamanho). Conferido no tema escuro e claro, e no Ubuntu 24.04.
+
+O portal Background deixou de ser necessário: o `snowd` roda como serviço e a bandeja é dele.
 
 ## 13 – Experimentos a validar antes de codar
 
