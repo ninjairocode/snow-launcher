@@ -72,6 +72,18 @@ enum Command {
     /// List the games in the house's library and their launch codes.
     Games,
 
+    /// Copy a game from another launcher (Lutris, Steam…) into the house's
+    /// library. The original is never changed. Without a path, list the
+    /// games that can be imported.
+    Import {
+        /// The game's folder, as `snowctl import` lists it.
+        path: Option<PathBuf>,
+
+        /// Only check and show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Open a game through Battle.net in the house.
     Play {
         /// Folder name (`"World of Warcraft"`) or product uid (`wowf`).
@@ -241,6 +253,9 @@ fn main() -> Result<()> {
         Command::Status { prefix } => status(prefix, &config),
         Command::Doctor { prefix, sessions } => doctor_command(prefix, sessions, &config),
         Command::Games => house::games(&mut io::stdout().lock()),
+        Command::Import { path, dry_run } => {
+            house::import(path.as_deref(), dry_run, &mut io::stdout().lock())
+        }
         Command::Play { game, dry_run } => house::play(&game, dry_run, &mut io::stdout().lock()),
         Command::CheckInstaller { path } => {
             let report = installer::check(&path)?;

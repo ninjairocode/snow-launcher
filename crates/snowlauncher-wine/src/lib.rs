@@ -6,6 +6,7 @@ pub mod daemon_client;
 pub mod desktop;
 pub mod game_icon;
 pub mod house;
+pub mod import;
 pub mod installer_cache;
 pub mod instance;
 pub mod library;
