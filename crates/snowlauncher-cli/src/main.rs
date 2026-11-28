@@ -376,9 +376,13 @@ fn service_command(action: ServiceAction) -> Result<()> {
 
     match action {
         ServiceAction::Install { dry_run, snowd } => {
-            let snowd = match snowd {
-                Some(path) => path,
-                None => service::sibling_snowd()?,
+            // A path given by hand wins; otherwise what this install
+            // needs (an AppImage runs itself with `snowd`, never its
+            // temporary mount).
+            let (snowd, args) = match snowd {
+                Some(path) => (path, Vec::new()),
+                None => snowlauncher_wine::user_service::install_kind()
+                    .snowd_command(&service::sibling_snowd()?),
             };
             service::check_snowd_exists(&snowd)?;
             if snowd.components().any(|part| part.as_os_str() == "target") {
@@ -390,7 +394,13 @@ fn service_command(action: ServiceAction) -> Result<()> {
             }
             refuse_if_started_by_hand(&mut systemd)?;
 
-            let content = service::render_unit(&snowd)?;
+            let content = service::render_unit(&snowd, &args)?;
+            writeln!(
+                out,
+                "the service will run: {} {}",
+                snowd.display(),
+                args.join(" ")
+            )?;
             let existing = service::read_existing(&unit_path)?;
             let steps = service::plan_install(&unit_path, &content, existing.as_deref());
             run_plan(&mut out, &steps, &content, dry_run, &mut systemd)?;

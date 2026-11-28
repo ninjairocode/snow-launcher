@@ -15,6 +15,7 @@ pub mod install;
 pub mod installer;
 pub mod library;
 pub mod network;
+pub mod packaging;
 pub mod process;
 pub mod registry;
 pub mod shutdown;

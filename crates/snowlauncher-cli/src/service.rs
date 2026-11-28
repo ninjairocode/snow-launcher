@@ -13,13 +13,22 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
 
-/// Unit template; `@SNOWD@` is replaced with the path of `snowd`.
+/// Unit template; `@SNOWD@` is replaced with the command that runs `snowd`.
 const TEMPLATE: &str = include_str!("../../../data/systemd/snowd.service.in");
 const PLACEHOLDER: &str = "@SNOWD@";
 pub const UNIT_NAME: &str = "snowd.service";
 
-/// Fills the template with the `snowd` path, quoted for systemd.
-pub fn render_unit(snowd: &Path) -> Result<String> {
+/// Fills the template with the command that runs `snowd`: `program`
+/// (quoted for systemd) and its `args` (simple words only, like `snowd`
+/// for the AppImage, so they never need escaping).
+pub fn render_unit(snowd: &Path, args: &[String]) -> Result<String> {
+    ensure!(
+        args.iter().all(|arg| !arg.is_empty()
+            && arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')),
+        "unsupported argument for the snowd service: {args:?}"
+    );
     ensure!(
         snowd.is_absolute(),
         "the snowd path must be absolute: {}",
@@ -35,8 +44,12 @@ pub fn render_unit(snowd: &Path) -> Result<String> {
         "unsupported character in the snowd path: {text}"
     );
     // `%` starts a systemd specifier (like `%h`); `%%` is a literal `%`.
-    let quoted = format!("\"{}\"", text.replace('%', "%%"));
-    Ok(TEMPLATE.replace(PLACEHOLDER, &quoted))
+    let mut command = format!("\"{}\"", text.replace('%', "%%"));
+    for arg in args {
+        command.push(' ');
+        command.push_str(arg);
+    }
+    Ok(TEMPLATE.replace(PLACEHOLDER, &command))
 }
 
 /// One action of an install or uninstall.
@@ -244,6 +257,21 @@ mod tests {
     }
 
     #[test]
+    fn an_appimage_service_runs_the_appimage_with_snowd() {
+        let unit = render_unit(
+            Path::new("/home/user/Apps/Snow_Launcher-x86_64.AppImage"),
+            &["snowd".to_owned()],
+        )
+        .unwrap();
+        assert!(
+            unit.contains("ExecStart=\"/home/user/Apps/Snow_Launcher-x86_64.AppImage\" snowd\n"),
+            "{unit}"
+        );
+        assert!(render_unit(Path::new(SNOWD), &["a b".to_owned()]).is_err());
+        assert!(render_unit(Path::new(SNOWD), &["$(x)".to_owned()]).is_err());
+    }
+
+    #[test]
     fn template_has_restart_limits() {
         assert!(TEMPLATE.contains("Restart=on-failure"));
         assert!(TEMPLATE.contains("StartLimitIntervalSec=600"));
@@ -253,22 +281,22 @@ mod tests {
 
     #[test]
     fn renders_quoted_exec_start() {
-        let unit = render_unit(Path::new(SNOWD)).unwrap();
+        let unit = render_unit(Path::new(SNOWD), &[]).unwrap();
         assert!(unit.contains("\nExecStart=\"/home/user/.cargo/bin/snowd\"\n"));
         assert!(!unit.contains(PLACEHOLDER));
     }
 
     #[test]
     fn escapes_systemd_specifiers_and_keeps_spaces() {
-        let unit = render_unit(Path::new("/home/user/My Apps/100%/snowd")).unwrap();
+        let unit = render_unit(Path::new("/home/user/My Apps/100%/snowd"), &[]).unwrap();
         assert!(unit.contains("ExecStart=\"/home/user/My Apps/100%%/snowd\""));
     }
 
     #[test]
     fn rejects_unsafe_paths() {
-        assert!(render_unit(Path::new("snowd")).is_err());
-        assert!(render_unit(Path::new("/home/user/a\"b/snowd")).is_err());
-        assert!(render_unit(Path::new("/home/user/a\\b/snowd")).is_err());
+        assert!(render_unit(Path::new("snowd"), &[]).is_err());
+        assert!(render_unit(Path::new("/home/user/a\"b/snowd"), &[]).is_err());
+        assert!(render_unit(Path::new("/home/user/a\\b/snowd"), &[]).is_err());
     }
 
     fn steps_text(steps: &[Step]) -> Vec<String> {
@@ -331,7 +359,7 @@ mod tests {
     fn install_then_uninstall_on_disk() {
         let tmp = tempfile::tempdir().unwrap();
         let unit_path = tmp.path().join("systemd/user").join(UNIT_NAME);
-        let content = render_unit(Path::new(SNOWD)).unwrap();
+        let content = render_unit(Path::new(SNOWD), &[]).unwrap();
         let mut systemd = FakeSystemd::default();
 
         // A different unit was there before: it must be backed up.
