@@ -391,3 +391,23 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 - `snowctl house battlenet-icon hide|show|status`: backup da chave com `reg export` (quando ela existe), mudança com `reg add`/`reg delete` e conferência com `reg query`. O `show` é a reversão.
 - A mudança vale na próxima vez que a casinha iniciar do zero (o `explorer.exe` lê a política ao iniciar).
 - Vale para todos os programas da casinha; nela só moram o Battle.net e o Agent.
+
+## O15 – Trocar o Proton da casinha, e uma sessão travada
+
+**Data:** 2026-11-28
+**Contexto:** primeiro uso do `snowctl house runtime list|set`. O ProtonPlus tinha instalado `GE-Proton11-12`, `GE-Proton11-14`, `UMU-Proton-10.0-4` e `Proton-GE Latest`. Este último é uma pasta de verdade, não um link, que o ProtonPlus atualiza sozinho; o arquivo `version` dela dizia `GE-Proton11-14`.
+
+### Resultados
+
+1. **Sessão travada:** um Battle.net aberto às 22:32 pela bandeja ficou sem janela e sem processos filhos, e **ignorava o pedido de fechar** (o `taskkill` sem `/f` respondia "mensagem de fechamento enviada", mas o processo continuava). Uma segunda execução do `Battle.net.exe` não o reconheceu como aberto e **subiu uma segunda instância completa**, com outro Agent.
+2. Fechar o Battle.net pelo menu dele encerrou as duas instâncias, mas a sessão antiga ficou "pendurada": o `umu.exe` (o lançador do Proton) continuava esperando, e com ele o `wineserver` e os serviços do Wine (`services.exe`, `winedevice.exe`, `plugplay.exe`, `svchost.exe`). **`wineserver -k`** na casinha encerrou tudo em ~2 s.
+3. **A troca de Proton recusou com a casinha em uso**, como previsto, e listou o que estava rodando.
+4. **Troca com a casinha vazia:** `runtime set "Proton-GE Latest"` fez backup do `house.toml` e trocou; o Battle.net subiu com o Proton novo (conferido no processo) e logou em 8 s; o `quit` fechou na hora e a casinha esvaziou em 12 s; a volta ao `GE-Proton11-14-x86_64` funcionou, com outro backup.
+5. Os processos do Wine na casinha têm `WINEPREFIX=<casinha>/pfx/`: o `pfx` é um link do umu para a própria pasta.
+6. **Backup do prefixo antes de trocar** (regra da seção de escolha do Proton): `cp -a --reflink=auto` copiou o prefixo de 1,6 GB em **0,23 s, sem gastar espaço** (Btrfs). A unidade `g:` continuou um link, e os jogos não foram copiados.
+7. Duas trocas no mesmo segundo geraram o mesmo nome de backup: a segunda recusou (o backup do prefixo já existia), mas antes **sobrescreveu o backup do registro** da primeira. Corrigido: os nomes de backup passaram a ser únicos (`-2`, `-3`…) e o prefixo é copiado antes de gravar qualquer outra coisa.
+
+### Consequências
+
+- Com uma sessão saudável, o fechamento educado funciona (como no E10); a falha do item 1 vem da sessão travada.
+- O `quit` precisa de um passo a mais quando o Battle.net não fecha: o encerramento gradual previsto (pedido normal → espera → `wineserver -k`), **nunca** com um jogo aberto. Fica para um PR próprio.

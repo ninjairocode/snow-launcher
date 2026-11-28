@@ -256,6 +256,119 @@ pub fn set_battlenet_icon(
     Ok(IconChange { backup })
 }
 
+/// Programs still running in the house (any process with its
+/// `WINEPREFIX`, `wineserver` included), by name.
+pub fn house_in_use(prefix: &Path) -> Result<Vec<String>, HouseError> {
+    use snowlauncher_core::process::{ProcessTable, processes_in_prefix};
+    let processes = crate::procfs::ProcfsProcessTable::new()
+        .processes()
+        .map_err(|error| HouseError::Step {
+            step: "list processes".to_owned(),
+            problem: error.to_string(),
+        })?;
+    let mut names: Vec<String> = processes_in_prefix(&processes, prefix)
+        .map(|process| process.display_name().to_owned())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    Ok(names)
+}
+
+/// A path in `dir` named `<stem>-<unix time><ext>` that does not exist yet
+/// (`-2`, `-3`… added if needed): a backup must never overwrite another.
+pub fn unique_backup_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let mut path = dir.join(format!("{stem}-{stamp}{ext}"));
+    let mut n = 2;
+    while fs::symlink_metadata(&path).is_ok() {
+        path = dir.join(format!("{stem}-{stamp}-{n}{ext}"));
+        n += 1;
+    }
+    path
+}
+
+/// The backups [`set_runtime`] made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeSwitch {
+    pub record_backup: PathBuf,
+    /// A full copy of the prefix: another Proton may upgrade it, and going
+    /// back to an older one without this copy can break it.
+    pub prefix_backup: PathBuf,
+}
+
+/// Copies the prefix to `target` with `cp -a --reflink=auto`: instant and
+/// free on Btrfs/XFS, a plain copy elsewhere. Symlinks are copied as
+/// links, so the library drive (`g:`) and the games are never copied.
+pub fn backup_prefix(prefix: &Path, target: &Path) -> Result<(), HouseError> {
+    if target.exists() {
+        return Err(HouseError::Step {
+            step: "back up the prefix".to_owned(),
+            problem: format!("{} already exists", target.display()),
+        });
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(io_err("create", parent))?;
+    }
+    let status = std::process::Command::new("cp")
+        .args(["-a", "--reflink=auto", "--"])
+        .arg(prefix)
+        .arg(target)
+        .status()
+        .map_err(io_err("copy", prefix))?;
+    if !status.success() {
+        // Leave no half copy behind.
+        let _ = fs::remove_dir_all(target);
+        return Err(HouseError::Step {
+            step: "back up the prefix".to_owned(),
+            problem: format!("cp exited with {status}"),
+        });
+    }
+    Ok(())
+}
+
+/// Switches the house to another Proton. Refuses while anything runs in
+/// the house: changing Proton under a running Wine can break the prefix.
+/// Backs up the record (to `backup_dir`) and the whole prefix (to
+/// `prefix_backup_dir`, which should be on the prefix's disk for reflink)
+/// first.
+pub fn set_runtime(
+    record_file: &Path,
+    runtime: &crate::runtime::Runtime,
+    backup_dir: &Path,
+    prefix_backup_dir: &Path,
+) -> Result<RuntimeSwitch, HouseError> {
+    let mut record = load_record(record_file)?.ok_or_else(|| HouseError::Step {
+        step: "switch Proton".to_owned(),
+        problem: "there is no house yet".to_owned(),
+    })?;
+    let running = house_in_use(&record.prefix)?;
+    if !running.is_empty() {
+        return Err(HouseError::Step {
+            step: "switch Proton".to_owned(),
+            problem: format!(
+                "the house is in use ({}); close Battle.net and wait for it to stop",
+                running.join(", ")
+            ),
+        });
+    }
+    fs::create_dir_all(backup_dir).map_err(io_err("create", backup_dir))?;
+    // The prefix first: if its copy fails, nothing else was written.
+    let prefix_backup = unique_backup_path(prefix_backup_dir, "prefix", "");
+    backup_prefix(&record.prefix, &prefix_backup)?;
+    let record_backup = unique_backup_path(backup_dir, "house", ".toml");
+    let current = fs::read(record_file).map_err(io_err("read", record_file))?;
+    write_atomic(&record_backup, &current).map_err(io_err("write", &record_backup))?;
+    record.runtime_name = runtime.name.clone();
+    record.runtime_path = runtime.path.clone();
+    save_record(record_file, &record)?;
+    Ok(RuntimeSwitch {
+        record_backup,
+        prefix_backup,
+    })
+}
+
 /// What [`quit_battlenet`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuitOutcome {
@@ -953,6 +1066,82 @@ mod tests {
         };
         let error = run_battlenet(&runner, &[]).unwrap_err().to_string();
         assert!(error.contains("not installed"), "{error}");
+    }
+
+    #[test]
+    fn switching_proton_backs_up_the_record() {
+        let tmp = tempfile::tempdir().unwrap();
+        let record_file = tmp.path().join("state/house.toml");
+        // A prefix with a file and the library drive pointing outside it.
+        let prefix = tmp.path().join("prefix");
+        let games = tmp.path().join("games");
+        fs::create_dir_all(prefix.join("drive_c")).unwrap();
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(&games).unwrap();
+        fs::write(prefix.join("drive_c/file.txt"), "prefix data").unwrap();
+        fs::write(games.join("huge-game.bin"), "game data").unwrap();
+        std::os::unix::fs::symlink(&games, prefix.join("dosdevices/g:")).unwrap();
+        let record = HouseRecord {
+            schema: snowlauncher_core::house::HOUSE_RECORD_SCHEMA,
+            // No process runs with this prefix: the house is idle.
+            prefix: prefix.clone(),
+            runtime_name: "GE-Proton11-14-x86_64".to_owned(),
+            runtime_path: PathBuf::from("/c/GE-Proton11-14-x86_64"),
+            library: tmp.path().join("games"),
+            library_created: true,
+            dpi: 192,
+            created_at: 1,
+        };
+        save_record(&record_file, &record).unwrap();
+        let before = fs::read(&record_file).unwrap();
+
+        let umu = crate::runtime::Runtime {
+            name: "UMU-Proton-10.0-4".to_owned(),
+            path: PathBuf::from("/c/UMU-Proton-10.0-4"),
+            label: "UMU-Proton-10.0-4".to_owned(),
+            version: None,
+        };
+        let switch = set_runtime(
+            &record_file,
+            &umu,
+            &tmp.path().join("backups"),
+            &tmp.path().join("prefix-backups"),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(&switch.record_backup).unwrap(), before);
+
+        // Switching again at once (same second) keeps both backups.
+        let ge = crate::runtime::Runtime {
+            name: "GE-Proton11-14-x86_64".to_owned(),
+            path: PathBuf::from("/c/GE-Proton11-14-x86_64"),
+            label: "GE-Proton11-14".to_owned(),
+            version: Some((11, 14)),
+        };
+        let again = set_runtime(
+            &record_file,
+            &ge,
+            &tmp.path().join("backups"),
+            &tmp.path().join("prefix-backups"),
+        )
+        .unwrap();
+        assert_ne!(again.record_backup, switch.record_backup);
+        assert_ne!(again.prefix_backup, switch.prefix_backup);
+        assert_eq!(fs::read(&switch.record_backup).unwrap(), before);
+        let copy = &switch.prefix_backup;
+        assert_eq!(
+            fs::read_to_string(copy.join("drive_c/file.txt")).unwrap(),
+            "prefix data"
+        );
+        // The library drive is copied as a link: the games are not copied.
+        let g = copy.join("dosdevices/g:");
+        assert!(fs::symlink_metadata(&g).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_link(&g).unwrap(), games);
+        let now = load_record(&record_file).unwrap().unwrap();
+        // The last switch wins.
+        assert_eq!(now.runtime_name, "GE-Proton11-14-x86_64");
+        assert_eq!(now.runtime_path, PathBuf::from("/c/GE-Proton11-14-x86_64"));
+        assert_eq!(now.dpi, 192); // the rest is kept
     }
 
     #[test]

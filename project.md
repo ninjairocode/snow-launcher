@@ -238,6 +238,7 @@ O usuário pode usar o Proton que quiser, mas o Snow continua recomendando a ver
 **Regras de segurança:**
 - A lista mostra **"Recomendada (testada com o Battle.net)"** em destaque. As outras aparecem como **"Não testada pelo Snow"**, com aviso ao selecionar.
 - **Backup do prefixo antes de trocar de versão.** Um Proton mais novo atualiza o prefixo, e voltar para uma versão mais velha pode quebrar sem esse backup. Trocar de volta oferece restaurar o backup.
+  - **Feito no `snowctl house runtime set`** (O15): cópia por reflink (`cp -a --reflink=auto`, instantânea no Btrfs/XFS) em `~/.local/share/snow-launcher/backups/prefix-<hora>`, mais o backup do registro. Só com a casinha vazia. Falta o comando de restaurar o prefixo.
 - Se a versão escolhida for removida do sistema (por exemplo, apagada no ProtonPlus), o Snow avisa e oferece voltar para a recomendada, em vez de falhar ao abrir.
 - A versão recomendada vem do repositório de quirks, para poder mudar sem lançar versão nova do app.
 
@@ -437,7 +438,7 @@ A bandeja, a tela de progresso, a reconexão ao acordar e a correção do Agent 
 | Saber em que etapa está (iniciando, aguardando login, pronto, travado) | Marcas nos logs do cliente: `Logging started` → `AgentManager is now initialized` → `Login triggered` → `State changed to: Ready` / `Logged into Battle.net successfully`. "Aguardando login" = não chegou ao `Ready` em N s | **Validado** (E10, O8) |
 | Trazer a janela de volta (inclusive da bandeja) | Rodar o `Battle.net.exe` de novo com ele já aberto: a instância existente se mostra, sem abrir outra | **Validado** (E9, O8) |
 | Abrir um jogo direto | `Battle.net.exe --exec="launch <código do produto>"`. O código é o do produto (`WoWF`), **não** o *uid* do Agent (`wowf`, que é ignorado em silêncio); o log liga os dois (`productCode=WoWF_wowf`) | **Validado** (E5, O8) |
-| Fechar de forma limpa | `taskkill /im Battle.net.exe` sem `/f`: fecha de verdade em ~1 s (diferente do "X", que só esconde na bandeja), e o Agent sai sozinho em ~10 s. `wineserver -k` e sinais ficam só como plano B (seção 9.2) | **Validado** (E10, O8); em uso no `snowctl house quit` e na bandeja, recusado com jogo aberto (O13) |
+| Fechar de forma limpa | `taskkill /im Battle.net.exe` sem `/f`: fecha de verdade em ~1 s (diferente do "X", que só esconde na bandeja), e o Agent sai sozinho em ~10 s. `wineserver -k` e sinais ficam só como plano B (seção 9.2) | **Validado** (E10, O8); em uso no `snowctl house quit` e na bandeja, recusado com jogo aberto (O13). Uma sessão travada ignora o pedido; `wineserver -k` a encerrou (O15) |
 | Nunca fechar um jogo aberto | Checar os jogos do prefixo antes de qualquer encerramento (já existe no `snowd`) | **Base pronta** |
 
 Cada capacidade vira uma operação do `snowd` exposta no D-Bus (hoje a interface só tem propriedades de leitura), com `--dry-run` no `snowctl`, e só entra em uso automático depois de validada.

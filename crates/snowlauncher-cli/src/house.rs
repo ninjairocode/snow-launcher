@@ -28,7 +28,9 @@ use snowlauncher_wine::house::{
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 use snowlauncher_wine::prefix::{default_prefix_path, prefixes_root};
 use snowlauncher_wine::procfs::ProcfsProcessTable;
-use snowlauncher_wine::runtime::{Runtime, find_runtimes, find_umu_run, runtime_dirs};
+use snowlauncher_wine::runtime::{
+    Runtime, choose_runtime, default_runtime, find_runtimes, find_umu_run, runtime_dirs,
+};
 
 /// Default game library, under the user's home.
 const DEFAULT_LIBRARY: &str = "Games/SnowLauncher";
@@ -341,6 +343,129 @@ fn run_and_report(
     Ok(())
 }
 
+/// `snowctl house runtime list`: the Proton builds found, the house's
+/// marked with `*` and the default with "(default)".
+pub fn runtime_list(out: &mut impl io::Write) -> Result<()> {
+    let runtimes = find_runtimes(&runtime_dirs());
+    if runtimes.is_empty() {
+        writeln!(
+            out,
+            "No Proton found; install GE-Proton with ProtonPlus or ProtonUp-Qt."
+        )?;
+        return Ok(());
+    }
+    let current = record_path()
+        .and_then(|path| load_record(&path).ok().flatten())
+        .and_then(|record| fs::canonicalize(record.runtime_path).ok());
+    let default = default_runtime(&runtimes).map(|runtime| runtime.path.clone());
+    for runtime in &runtimes {
+        let mark = if current.as_ref() == Some(&runtime.path) {
+            '*'
+        } else {
+            ' '
+        };
+        let mut line = format!("{mark} {}", runtime.name);
+        if runtime.label != runtime.name {
+            line.push_str(&format!("  ({})", runtime.label));
+        }
+        if default.as_ref() == Some(&runtime.path) {
+            line.push_str("  (default)");
+        }
+        writeln!(out, "{line}")?;
+    }
+    Ok(())
+}
+
+/// `snowctl house runtime set`: switches the house to another Proton,
+/// with the house closed, backing the record up first.
+pub fn runtime_set(name: &str, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    let runtimes = find_runtimes(&runtime_dirs());
+    let chosen = choose_runtime(&runtimes, name).map_err(anyhow::Error::msg)?;
+    let record_file = record_path().context("could not determine the state directory")?;
+    let record = load_record(&record_file)?
+        .context("there is no house yet; create it first with `snowctl house create`")?;
+    let current_path =
+        fs::canonicalize(&record.runtime_path).unwrap_or(record.runtime_path.clone());
+    if current_path == chosen.path {
+        writeln!(out, "The house already uses {}.", chosen.name)?;
+        return Ok(());
+    }
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(
+        out,
+        "Switch the house from {} to {}{mode}",
+        record.runtime_name, chosen.name
+    )?;
+    let current_version = runtimes
+        .iter()
+        .find(|runtime| runtime.path == current_path)
+        .and_then(|runtime| runtime.version);
+    if let (Some(from), Some(to)) = (current_version, chosen.version) {
+        if to < from {
+            writeln!(
+                out,
+                "  warning: {} is older than the current one; Proton may not like a \
+                 prefix made by a newer version",
+                chosen.label
+            )?;
+        }
+    }
+    let running = executor::house_in_use(&record.prefix)?;
+    if !running.is_empty() {
+        anyhow::bail!(
+            "the house is in use ({}); close Battle.net (`snowctl house quit`) and wait for it to stop",
+            running.join(", ")
+        );
+    }
+    // Next to `prefixes/`, on the prefix's disk, so the copy can reflink.
+    let prefix_backups = record
+        .prefix
+        .parent()
+        .and_then(Path::parent)
+        .map(|data| data.join("backups"))
+        .context("the house's prefix has no parent folder")?;
+    if dry_run {
+        writeln!(out, "  back up {}", record_file.display())?;
+        writeln!(
+            out,
+            "  copy the prefix to {}/prefix-<time> (reflink when the disk allows)",
+            prefix_backups.display()
+        )?;
+        writeln!(
+            out,
+            "  record {} as the house's Proton",
+            chosen.path.display()
+        )?;
+        return Ok(());
+    }
+    let backups = record_file
+        .parent()
+        .map(|dir| dir.join("backups"))
+        .context("could not determine the state directory")?;
+    let switch = executor::set_runtime(&record_file, chosen, &backups, &prefix_backups)?;
+    writeln!(out, "Done.")?;
+    writeln!(
+        out,
+        "  backup of the old record: {}",
+        switch.record_backup.display()
+    )?;
+    writeln!(
+        out,
+        "  backup of the prefix:     {}",
+        switch.prefix_backup.display()
+    )?;
+    writeln!(
+        out,
+        "To go back: snowctl house runtime set \"{}\"",
+        record.runtime_name
+    )?;
+    Ok(())
+}
+
 /// What `snowctl house battlenet-icon` does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum IconAction {
@@ -642,12 +767,14 @@ fn pick_runtime(configured: Option<PathBuf>, home: &Path) -> Result<Runtime> {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         return Ok(Runtime {
+            label: name.clone(),
             name,
             path,
-            version: (0, 0),
+            version: None,
         });
     }
-    find_runtimes(&runtime_dirs()).into_iter().next().context(
+    let runtimes = find_runtimes(&runtime_dirs());
+    default_runtime(&runtimes).cloned().context(
         "no GE-Proton found; install one (for example with ProtonPlus or \
          ProtonUp-Qt) or set `runtime` under [house] in config.toml",
     )
