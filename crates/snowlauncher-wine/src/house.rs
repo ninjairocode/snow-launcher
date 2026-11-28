@@ -867,6 +867,17 @@ fn run_step(
                 }
             }
         }
+        HouseStep::HideTrayIcons => {
+            use snowlauncher_core::house::{TRAY_POLICY_KEY, TRAY_POLICY_VALUE, tray_policy_args};
+            let args = tray_policy_args(true);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let ran = run(runner, &args).map_err(fail)?;
+            // The runner waits for the house to settle: ask Wine itself.
+            let check = ["reg", "query", TRAY_POLICY_KEY, "/v", TRAY_POLICY_VALUE];
+            if run(runner, &check).map_err(fail)? != "exited normally" {
+                return Err(fail(format!("the policy is not set; reg add {ran}")));
+            }
+        }
         HouseStep::CreateLibrary { path } => {
             fs::create_dir_all(path).map_err(io_err("create", path))?;
             *created_library = true;
@@ -1134,12 +1145,16 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(seen, 5);
+        assert_eq!(seen, 6);
         assert_eq!(
             wine.calls[..2],
             ["wineboot -u".to_owned(), "winecfg -v win11".to_owned()]
         );
         assert!(wine.calls[2].starts_with("regedit /S Z:\\"));
+        assert!(
+            wine.calls[3].starts_with("reg add ") && wine.calls[3].contains("NoTrayItemsDisplay")
+        );
+        assert!(wine.calls[4].starts_with("reg query "));
         assert!(record.library_created);
         assert_eq!(record.dpi, 192);
         let link = s.inputs.prefix.join("dosdevices/g:");

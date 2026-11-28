@@ -985,7 +985,8 @@ mod tests {
             out.contains("Library:   /home/u/Games/SnowLauncher (will be created), seen as G:")
         );
         assert!(out.contains("  1. create the Wine prefix"));
-        assert!(out.contains("  5. map G: to /home/u/Games/SnowLauncher"));
+        assert!(out.contains("  4. hide Battle.net's tray icon"));
+        assert!(out.contains("  6. map G: to /home/u/Games/SnowLauncher"));
     }
 
     #[test]
