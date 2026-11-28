@@ -17,13 +17,13 @@ use relm4::factory::FactoryVecDeque;
 use relm4::{Component, ComponentParts, ComponentSender, RelmApp, RelmWidgetExt, adw, gtk};
 use snowlauncher_wine::battlenet_logs::{newest_session_log, session_stage};
 use snowlauncher_wine::daemon_client::query_async;
-use snowlauncher_wine::house::{battlenet_pid, launch_argument, open_house, run_battlenet};
+use snowlauncher_wine::house::{battlenet_pid, open_house, play_game, run_battlenet};
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 
 use crate::games::GameRow;
 use crate::state::{
-    BattlenetView, GameCard, House, Illustration, SessionTracker, StatusRow, action_message,
-    game_cards, house_text, read_house, status_rows,
+    BattlenetView, GameCard, House, Illustration, SessionTracker, StatusRow, game_cards,
+    house_text, open_message, play_message, read_house, status_rows,
 };
 
 const APP_ID: &str = "io.github.ninjairocode.SnowLauncher";
@@ -82,23 +82,36 @@ impl App {
         self.house.is_ready() && !self.busy
     }
 
-    /// Runs Battle.net with `args` on a worker thread; the result comes
-    /// back as [`CommandOutput::ActionDone`].
-    fn act(&mut self, what: String, args: Vec<String>, sender: &ComponentSender<Self>) {
+    /// Runs `job` on a worker thread (playing may wait for Battle.net to
+    /// log in); the result comes back as [`CommandOutput::ActionDone`].
+    fn act(&mut self, job: Job, sender: &ComponentSender<Self>) {
         if !self.can_act() {
             return;
         }
         self.busy = true;
         sender.spawn_oneshot_command(move || {
-            let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            let result = open_house()
-                .map_err(|error| error.to_string())
-                .and_then(|(_, runner)| {
-                    run_battlenet(&runner, &args).map_err(|error| error.to_string())
-                });
-            CommandOutput::ActionDone(action_message(&what, &result))
+            let house = open_house().map_err(|error| error.to_string());
+            let message = match job {
+                Job::OpenBattlenet => open_message(&house.and_then(|(_, runner)| {
+                    run_battlenet(&runner, &[]).map_err(|error| error.to_string())
+                })),
+                Job::Play { name, code } => play_message(
+                    &name,
+                    &house.and_then(|(_, runner)| {
+                        play_game(&runner, &code).map_err(|error| error.to_string())
+                    }),
+                ),
+            };
+            CommandOutput::ActionDone(message)
         });
     }
+}
+
+/// What a button asks for.
+#[derive(Debug)]
+enum Job {
+    OpenBattlenet,
+    Play { name: String, code: String },
 }
 
 #[derive(Debug)]
@@ -335,7 +348,7 @@ impl Component for App {
 
     fn update(&mut self, message: Msg, sender: ComponentSender<Self>, _: &Self::Root) {
         match message {
-            Msg::OpenBattlenet => self.act("Battle.net".to_owned(), Vec::new(), &sender),
+            Msg::OpenBattlenet => self.act(Job::OpenBattlenet, &sender),
             Msg::Scale(scale) => {
                 if scale != self.art.scale {
                     self.art = Illustrations::render(scale);
@@ -343,7 +356,11 @@ impl Component for App {
             }
             Msg::Play(card) => {
                 if let Some(code) = card.launch_code {
-                    self.act(card.name, vec![launch_argument(&code)], &sender);
+                    let job = Job::Play {
+                        name: card.name,
+                        code,
+                    };
+                    self.act(job, &sender);
                 }
             }
         }

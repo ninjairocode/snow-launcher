@@ -22,8 +22,8 @@ use snowlauncher_core::tray::{
     MenuItem, MenuKind, TrayAction, TrayGame, action_for, find, status_line, tray_menu,
 };
 use snowlauncher_wine::house::{
-    QUIT_TIMEOUT, QuitOutcome, launch_argument, load_record, open_house, quit_battlenet,
-    record_path, run_battlenet, write_atomic,
+    QUIT_TIMEOUT, QuitOutcome, load_record, open_house, play_game, quit_battlenet, record_path,
+    run_battlenet, write_atomic,
 };
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 use tokio::sync::{mpsc, watch};
@@ -492,7 +492,7 @@ async fn run_actions(bus: &zbus::Connection, mut requests: mpsc::UnboundedReceiv
         let result = match &action {
             TrayAction::OpenLauncher => open_launcher().await,
             TrayAction::OpenBattlenet => battlenet(Vec::new()).await,
-            TrayAction::Play { code, .. } => battlenet(vec![launch_argument(code)]).await,
+            TrayAction::Play { code, .. } => play(code.clone()).await,
             TrayAction::QuitBattlenet => quit().await,
         };
         if let Err(problem) = result {
@@ -541,6 +541,19 @@ async fn battlenet(args: Vec<String>) -> Result<(), String> {
     .await
     .map_err(|error| error.to_string())?
     .map_err(|problem: String| format!("Could not open Battle.net: {problem}"))
+}
+
+/// Opens a game, starting Battle.net and waiting for its login first if
+/// needed (O13).
+async fn play(code: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let (_, runner) = open_house().map_err(|error| error.to_string())?;
+        play_game(&runner, &code).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map(|_| ())
+    .map_err(|problem| format!("Could not open the game: {problem}"))
 }
 
 /// Closes Battle.net (E10), re-checking for games right before.
