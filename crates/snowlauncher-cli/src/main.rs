@@ -96,6 +96,22 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum RuntimeAction {
+    /// List the Proton builds found (GE-Proton first), marking the house's.
+    List,
+    /// Switch the house to another Proton. Only with the house closed.
+    Set {
+        /// Folder name (`GE-Proton11-14-x86_64`, `Proton-GE Latest`) or
+        /// version (`UMU-Proton-10.0-4`).
+        name: String,
+
+        /// Only show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum HouseAction {
     /// Create the house: prefix, Windows 11, UI scale and the G: library.
     Create {
@@ -151,6 +167,11 @@ enum HouseAction {
         /// Only show what would be done.
         #[arg(long)]
         dry_run: bool,
+    },
+    /// List the Proton builds Snow can use, or switch the house to one.
+    Runtime {
+        #[command(subcommand)]
+        action: RuntimeAction,
     },
     /// Remove the house. Never deletes games.
     Remove {
@@ -221,6 +242,18 @@ fn main() -> Result<()> {
         Command::House {
             action: HouseAction::BattlenetIcon { action, dry_run },
         } => house::battlenet_icon(action, dry_run, &mut io::stdout().lock()),
+        Command::House {
+            action:
+                HouseAction::Runtime {
+                    action: RuntimeAction::List,
+                },
+        } => house::runtime_list(&mut io::stdout().lock()),
+        Command::House {
+            action:
+                HouseAction::Runtime {
+                    action: RuntimeAction::Set { name, dry_run },
+                },
+        } => house::runtime_set(&name, dry_run, &mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Quit { dry_run },
         } => house::quit(dry_run, &mut io::stdout().lock()),
