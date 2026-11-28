@@ -96,6 +96,15 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum InstallerAction {
+    /// Show the kept copy and the installers in Downloads, checked.
+    Status,
+    /// Open Blizzard's download page in the browser (Snow itself
+    /// downloads nothing).
+    Download,
+}
+
+#[derive(Debug, Subcommand)]
 enum RuntimeAction {
     /// List the Proton builds found (GE-Proton first), marking the house's.
     List,
@@ -137,8 +146,10 @@ enum HouseAction {
     /// first, and watch the installation until Battle.net opens.
     InstallBattlenet {
         /// The official installer, e.g. ~/Downloads/Battle.net-Setup.exe.
+        /// Without it: the newest one in Downloads, then the last verified
+        /// copy Snow kept. Every one is checked by Blizzard's signature.
         #[arg(long, value_name = "PATH")]
-        installer: PathBuf,
+        installer: Option<PathBuf>,
 
         /// Only check and show what would be done.
         #[arg(long)]
@@ -188,6 +199,12 @@ enum HouseAction {
         /// Only show what would be done.
         #[arg(long)]
         dry_run: bool,
+    },
+    /// The Battle.net installer: what Snow has, or open the official
+    /// download page in the browser.
+    Installer {
+        #[command(subcommand)]
+        action: InstallerAction,
     },
     /// Remove the house. Never deletes games.
     Remove {
@@ -251,7 +268,7 @@ fn main() -> Result<()> {
         }
         Command::House {
             action: HouseAction::InstallBattlenet { installer, dry_run },
-        } => house::install_battlenet(&installer, dry_run, &mut io::stdout().lock()),
+        } => house::install_battlenet(installer.as_deref(), dry_run, &mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Open { dry_run },
         } => house::open(dry_run, &mut io::stdout().lock()),
@@ -273,6 +290,18 @@ fn main() -> Result<()> {
         Command::House {
             action: HouseAction::RestorePrefix { backup, dry_run },
         } => house::restore_prefix(backup.as_deref(), dry_run, &mut io::stdout().lock()),
+        Command::House {
+            action:
+                HouseAction::Installer {
+                    action: InstallerAction::Status,
+                },
+        } => installer::status(&mut io::stdout().lock()),
+        Command::House {
+            action:
+                HouseAction::Installer {
+                    action: InstallerAction::Download,
+                },
+        } => installer::open_download_page(&mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Quit { dry_run, force },
         } => house::quit(dry_run, force, &mut io::stdout().lock()),
