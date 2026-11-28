@@ -273,7 +273,9 @@ Importar sempre traz o jogo **para a biblioteca do Snow** (ver "Casinha e biblio
    - **Reflink disponível:** copiar por reflink e conferir arquivo a arquivo (caminho e tamanho); o original fica intacto.
    - **Mesmo disco, sem reflink:** `rename` da pasta. É instantâneo e atômico, não copia nada.
    - **Outro disco:** copiar → verificar (quantidade de arquivos e tamanhos) → só então **oferecer** apagar o original. Nunca apagar antes de confirmar a cópia. Se a cópia for interrompida, a pasta parcial é descartada e o original continua intacto.
-5. Abrir a casinha e guiar o usuário no **"Localizar jogo"** do Battle.net, apontando para `G:\<nome do jogo>`. O Battle.net verifica os arquivos e baixa só o que faltar.
+5. Abrir a casinha e guiar o usuário no **"Localizar jogo"** do Battle.net, apontando para `G:\<nome do jogo>`. O Battle.net verifica os arquivos e baixa só o que faltar. O Battle.net não acha sozinho um jogo copiado (O6, O17), e o Snow não escreve nos dados dele para forçar isso.
+
+**Feito no `snowctl import`** (O17): sem argumento, lista os jogos dos outros launchers (Lutris, Steam, `~/Games`); com a pasta, copia para a biblioteca da casinha numa pasta temporária, por reflink quando o disco permite (senão, cópia normal depois de conferir o espaço), confere arquivo a arquivo e só então dá o nome final. O original nunca é apagado nem alterado (o "oferecer apagar o original" do passo 4 fica para depois). Recusa se o jogo já está na biblioteca ou se algo roda no prefixo de origem.
 6. Registrar no histórico de onde o jogo veio, para facilitar o suporte.
 
 O app Battle.net e os dados do outro launcher **não são importados**: a casinha instala o seu próprio Battle.net. Só os jogos mudam de lugar.

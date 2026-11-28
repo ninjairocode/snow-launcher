@@ -428,3 +428,22 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 
 - **MangoHud** é uma opção da casinha: o Snow inicia o Battle.net com `MANGOHUD=1`, e os jogos abertos por ele herdam. Vale na próxima vez que o Battle.net abrir; não dá para ligar por jogo.
 - **GameMode** fica com o `snowd`: ele já detecta o jogo, então registra só o processo do jogo e o tira quando o jogo fecha. O Battle.net não fica com o modo jogo ligado.
+
+## O17 – E16: importar jogos de outros launchers
+
+**Data:** 2026-11-28
+**Ambiente:** o WoW original no prefixo do Lutris (`~/Games/battlenet`), a casinha com a cópia por reflink do O9, Btrfs.
+
+### Resultados
+
+1. **De onde importar:** os prefixos do Lutris saem das configurações dele (linhas `prefix:` nos `.yml` de `~/.config/lutris/games` e `~/.local/share/lutris/games`); os da Steam, de `compatdata/*/pfx`; e há as pastas de `~/Games` que são prefixos. Cada jogo Blizzard é reconhecido pelo `.build.info` (até 4 níveis abaixo do `drive_c`). Na máquina do mantenedor: o WoW do Lutris (`wowf`, 52 GB). A biblioteca do Snow não é prefixo, e os prefixos do próprio Snow ficam de fora.
+2. **Cópia por reflink para uma biblioteca de teste** (no mesmo disco): 5.008 arquivos e 52 GB em **0,3 s**, conferidos arquivo a arquivo (caminho e tamanho), **sem gastar espaço**; o original não teve nenhum item modificado. Apagar a cópia de teste também não liberou nada (os blocos são do original).
+3. **O Battle.net não acha sozinho um jogo copiado** (hipótese, não testada com um segundo jogo): no E6 o WoW só apareceu depois do "Localizar jogo" (O6), e o Battle.net guarda a lista de jogos num banco do Agent, sem varrer pastas. Fazer o Battle.net "enxergar" automaticamente exigiria escrever nesse banco ou clicar na interface dele por fora, o que o Snow não faz. A importação termina guiando o "Localizar jogo" com o caminho `G:\<pasta>`.
+
+### Lição de método
+
+- Nesta máquina o `find` é o `bfs`, que lista os arquivos em **ordem variável**: comparar listagens sem `sort` dá diferença falsa.
+
+### Em aberto
+
+- Confirmar o item 3 com um usuário que tenha um segundo jogo.

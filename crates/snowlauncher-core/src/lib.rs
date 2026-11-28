@@ -10,6 +10,7 @@ pub mod desktop;
 pub mod display;
 pub mod errors;
 pub mod house;
+pub mod import;
 pub mod install;
 pub mod installer;
 pub mod library;

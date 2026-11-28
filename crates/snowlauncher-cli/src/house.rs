@@ -720,6 +720,80 @@ pub fn games(out: &mut impl io::Write) -> Result<()> {
     Ok(())
 }
 
+/// `snowctl import [path]`: lists the games other launchers have, or
+/// copies one into the house's library and explains "Locate the game".
+pub fn import(path: Option<&Path>, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    use snowlauncher_core::import::locate_path;
+    use snowlauncher_wine::import::{check_game_import, find_import_sources, import_game};
+
+    let record_file = record_path().context("could not determine the state directory")?;
+    let record = load_record(&record_file)?
+        .context("there is no house yet; create it first with `snowctl house create`")?;
+    let Some(path) = path else {
+        let found = find_import_sources();
+        if found.is_empty() {
+            writeln!(out, "No Blizzard games found in other launchers' prefixes.")?;
+            return Ok(());
+        }
+        writeln!(
+            out,
+            "Games in other launchers (import with `snowctl import <folder>`):"
+        )?;
+        for game in &found {
+            let size = executor::dir_size(&game.path) / 1_000_000_000;
+            writeln!(out, "  {} ({}, {size} GB)", game.name, game.product)?;
+            writeln!(out, "    {}", game.path.display())?;
+        }
+        return Ok(());
+    };
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "Import {}{mode}", path.display())?;
+    let target = check_game_import(path, &record.library)?;
+    let name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if dry_run {
+        writeln!(
+            out,
+            "  copy it to {} (reflink when the disk allows)",
+            target.display()
+        )?;
+        writeln!(out, "  compare the copy with the original, file by file")?;
+        writeln!(out, "  the original stays as it is")?;
+        return Ok(());
+    }
+    writeln!(
+        out,
+        "  copying… (instant with reflink; a plain copy takes a while)"
+    )?;
+    out.flush()?;
+    let imported = import_game(path, &record.library)?;
+    let how = if imported.reflink {
+        "reflink: instant, sharing the disk space with the original"
+    } else {
+        "plain copy"
+    };
+    writeln!(
+        out,
+        "Done: {} files, {} GB, checked ({how}).",
+        imported.files,
+        imported.bytes / 1_000_000_000
+    )?;
+    writeln!(
+        out,
+        "\nNow open Battle.net (`snowctl house open`), pick the game and use \
+         \"Locate the game\" with {}. Battle.net checks the files and only \
+         downloads what is missing.",
+        locate_path(&name)
+    )?;
+    Ok(())
+}
+
 /// `snowctl play <game>`: opens a game through Battle.net. `<game>` is
 /// the folder name or the product uid, ignoring case.
 pub fn play(game: &str, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
