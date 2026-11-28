@@ -223,12 +223,19 @@ pub struct GameCard {
     pub detail: String,
     /// `None` until Battle.net's log reveals it: "Play" stays disabled.
     pub launch_code: Option<String>,
+    /// The icon read from the game's own executable, if any.
+    pub icon: Option<PathBuf>,
 }
 
-pub fn game_cards(games: &[InstalledGame]) -> Vec<GameCard> {
+/// One card per game; `icon` finds a game's icon (IO, kept out of here).
+pub fn game_cards(
+    games: &[InstalledGame],
+    icon: impl Fn(&InstalledGame) -> Option<PathBuf>,
+) -> Vec<GameCard> {
     games
         .iter()
         .map(|game| GameCard {
+            icon: icon(game),
             name: game.name.clone(),
             detail: match (&game.launch_code, &game.build.version) {
                 (None, _) => {
@@ -416,7 +423,9 @@ mod tests {
 
     #[test]
     fn a_game_without_launch_code_explains_why() {
-        let cards = game_cards(&[game(Some("WoWF"), Some("1.60")), game(None, Some("1.60"))]);
+        let games = [game(Some("WoWF"), Some("1.60")), game(None, Some("1.60"))];
+        let cards = game_cards(&games, |_| Some(PathBuf::from("/cache/wowf.png")));
+        assert_eq!(cards[0].icon.as_deref(), Some(Path::new("/cache/wowf.png")));
         assert_eq!(cards[0].detail, "Version 1.60");
         assert_eq!(cards[0].launch_code.as_deref(), Some("WoWF"));
         assert!(cards[1].detail.contains("Open Battle.net once"));

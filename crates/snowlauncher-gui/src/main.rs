@@ -8,6 +8,7 @@
 //! falls back to pixels when the desktop publishes no text DPI.
 
 mod games;
+mod images;
 mod state;
 
 use std::time::{Duration, Instant};
@@ -17,6 +18,7 @@ use relm4::factory::FactoryVecDeque;
 use relm4::{Component, ComponentParts, ComponentSender, RelmApp, RelmWidgetExt, adw, gtk};
 use snowlauncher_wine::battlenet_logs::{newest_session_log, session_stage};
 use snowlauncher_wine::daemon_client::query_async;
+use snowlauncher_wine::game_icon::game_icon;
 use snowlauncher_wine::house::{battlenet_pid, open_house, play_game, run_battlenet};
 use snowlauncher_wine::library::{installed_games, known_product_codes};
 
@@ -315,10 +317,16 @@ impl Component for App {
                         let games_due = games_read.is_none_or(|at| at.elapsed() >= GAMES_EVERY)
                             || (is_ready && !was_ready);
                         was_ready = is_ready;
-                        let cards = games_due.then(|| {
+                        let cards = if games_due {
                             games_read = Some(Instant::now());
-                            read_games(&house)
-                        });
+                            // The first icon extraction reads the game's
+                            // executable: keep it off this thread.
+                            let for_games = house.clone();
+                            let read = tokio::task::spawn_blocking(move || read_games(&for_games));
+                            Some(read.await.unwrap_or_default())
+                        } else {
+                            None
+                        };
                         let starting = matches!(
                             battlenet,
                             BattlenetView::Starting | BattlenetView::LoggingIn
@@ -424,7 +432,8 @@ fn battlenet_view(house: &House, tracker: &mut SessionTracker) -> BattlenetView 
 fn read_games(house: &House) -> Vec<GameCard> {
     match house {
         House::Ready { prefix, library } => {
-            game_cards(&installed_games(library, &known_product_codes(prefix)))
+            let games = installed_games(library, &known_product_codes(prefix));
+            game_cards(&games, game_icon)
         }
         _ => Vec::new(),
     }
@@ -459,40 +468,8 @@ impl Illustrations {
 /// Rasterizes an embedded SVG at the height it is shown, in device pixels
 /// (`ILLUSTRATION_HEIGHT` × `scale`). Loading the SVG at its own small
 /// size (128 px) and stretching it was what made it blurry.
-///
-/// A missing SVG loader (librsvg) must not take the window down: the
-/// illustration is then just not shown.
 fn texture(name: &str, bytes: &'static [u8], scale: i32) -> Option<gtk::gdk::Texture> {
-    use gtk::{gdk, gdk_pixbuf, gio, glib};
-    let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_static(bytes));
-    let height = ILLUSTRATION_HEIGHT * scale;
-    let pixbuf = match gdk_pixbuf::Pixbuf::from_stream_at_scale(
-        &stream,
-        -1,
-        height,
-        true,
-        gio::Cancellable::NONE,
-    ) {
-        Ok(pixbuf) => pixbuf,
-        Err(error) => {
-            eprintln!("snow-launcher: could not load the {name} illustration: {error}");
-            return None;
-        }
-    };
-    let format = if pixbuf.has_alpha() {
-        gdk::MemoryFormat::R8g8b8a8
-    } else {
-        gdk::MemoryFormat::R8g8b8
-    };
-    let stride = usize::try_from(pixbuf.rowstride()).ok()?;
-    let texture = gdk::MemoryTexture::new(
-        pixbuf.width(),
-        pixbuf.height(),
-        format,
-        &pixbuf.read_pixel_bytes(),
-        stride,
-    );
-    Some(texture.upcast())
+    images::svg_texture(name, bytes, ILLUSTRATION_HEIGHT * scale)
 }
 
 fn main() {
