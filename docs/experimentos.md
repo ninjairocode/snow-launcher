@@ -411,3 +411,20 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 
 - Com uma sessão saudável, o fechamento educado funciona (como no E10); a falha do item 1 vem da sessão travada.
 - O `quit` precisa de um passo a mais quando o Battle.net não fecha: o encerramento gradual previsto (pedido normal → espera → `wineserver -k`), **nunca** com um jogo aberto. Fica para um PR próprio.
+
+## O16 – E15: MangoHud e GameMode com o umu
+
+**Data:** 2026-11-28
+**Ambiente:** a casinha (GE-Proton11-14, umu com o contêiner pressure-vessel), Fedora 45 com MangoHud 0.8.3 (camada Vulkan implícita, ligada por `MANGOHUD=1`) e GameMode 1.8.2, RX 7600.
+
+### Resultados
+
+1. **O jogo herda o ambiente do Battle.net** (a pergunta aberta do E5): com o Battle.net iniciado com `MANGOHUD=1`, o `Wow.exe` aberto por ele tinha `MANGOHUD=1` e também o `QT_ENABLE_HIGHDPI_SCALING=0` da casinha.
+2. **O contêiner do umu enxerga o MangoHud do sistema**: a `libMangoHud` foi carregada no `Wow.exe` (junto com o Vulkan), e o overlay apareceu no jogo com a configuração do próprio usuário (`~/.config/MangoHud/MangoHud.conf`).
+3. **O Battle.net não mostra o overlay**: ele tinha `MANGOHUD=1`, mas não carregou a biblioteca.
+4. **GameMode por PID, pelo D-Bus**: `RegisterGameByPID(quem chama, pid)` no `com.feralinteractive.GameMode` ativou o modo jogo para o processo (`QueryStatusByPID` = 2), e o `UnregisterGameByPID` o tirou. Não precisa de `gamemoderun` nem de `LD_PRELOAD`, que no contêiner seriam um problema.
+
+### Consequências
+
+- **MangoHud** é uma opção da casinha: o Snow inicia o Battle.net com `MANGOHUD=1`, e os jogos abertos por ele herdam. Vale na próxima vez que o Battle.net abrir; não dá para ligar por jogo.
+- **GameMode** fica com o `snowd`: ele já detecta o jogo, então registra só o processo do jogo e o tira quando o jogo fecha. O Battle.net não fica com o modo jogo ligado.

@@ -262,6 +262,18 @@ pub fn plan_house(inputs: &HouseInputs, existing: Existing) -> Result<Vec<HouseS
     Ok(steps)
 }
 
+/// Extra environment for Battle.net from the performance options: the
+/// games it opens inherit it (O16).
+pub fn performance_env(
+    performance: &crate::config::PerformanceConfig,
+) -> Vec<(&'static str, &'static str)> {
+    let mut env = Vec::new();
+    if performance.mangohud {
+        env.push(("MANGOHUD", "1"));
+    }
+    env
+}
+
 /// Windows' policy "hide the notification area items", which Wine's
 /// `explorer.exe` honours (experiment E14). Set in the house, its programs
 /// put no icon in the desktop tray: Battle.net's blurry one goes away and
@@ -425,6 +437,18 @@ mod tests {
             plan_house(&inside, NEW),
             Err(PlanError::LibraryInsidePrefix(_))
         ));
+    }
+
+    #[test]
+    fn mangohud_only_when_asked() {
+        use crate::config::PerformanceConfig;
+        assert!(performance_env(&PerformanceConfig::default()).is_empty());
+        let on = PerformanceConfig {
+            mangohud: true,
+            gamemode: true,
+        };
+        // GameMode is not an environment variable: snowd handles it.
+        assert_eq!(performance_env(&on), [("MANGOHUD", "1")]);
     }
 
     #[test]

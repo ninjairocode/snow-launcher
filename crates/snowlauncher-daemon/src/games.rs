@@ -18,6 +18,7 @@ use tracing::{info, warn};
 
 use crate::connections::ConnectionMonitor;
 use crate::dbus::Status;
+use crate::gamemode::{GameModeClient, GameModeSession};
 
 /// Keeps the inhibition in sync with the set of running games.
 pub struct GameGuard<I> {
@@ -95,11 +96,12 @@ impl<I: SuspendInhibitor> GameGuard<I> {
 /// Polls the processes of `prefix` every `every`, then updates the
 /// suspend inhibition and samples the games' connections.
 /// Only returns on a fatal error (e.g. `/proc` unreadable).
-pub async fn watch_games<T, I, N, M>(
+pub async fn watch_games<T, I, N, M, G>(
     system: &T,
     prefix: &Path,
     guard: &mut GameGuard<I>,
     connections: &mut ConnectionMonitor<N, M>,
+    gamemode: &mut GameModeSession<G>,
     status: &tokio::sync::watch::Sender<Status>,
     every: Duration,
 ) -> Result<()>
@@ -108,6 +110,7 @@ where
     I: SuspendInhibitor,
     N: NetworkMonitor,
     M: Notifier,
+    G: GameModeClient,
 {
     let mut ticker = tokio::time::interval(every);
     // After a suspend, do not fire a burst of missed ticks.
@@ -122,6 +125,7 @@ where
         let titles = game_titles(games);
         guard.update(titles.clone()).await;
         connections.update(system, &pids, &titles).await;
+        gamemode.update(&pids).await;
 
         // Publish only real changes, so D-Bus clients get no noise.
         status.send_if_modified(|current| {

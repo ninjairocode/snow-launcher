@@ -112,6 +112,8 @@ pub fn create(options: CreateOptions, config: &Config, out: &mut impl io::Write)
         prefix: summary.inputs.prefix.clone(),
         runtime: summary.runtime_path.clone(),
         log: log.clone(),
+        // Creating the prefix: no game, so no performance options.
+        extra_env: Vec::new(),
     };
 
     writeln!(out, "\nCreating (Wine tools log: {}):", log.display())?;
@@ -190,6 +192,8 @@ pub fn install_battlenet(installer: &Path, dry_run: bool, out: &mut impl io::Wri
         prefix: prefix.clone(),
         runtime: record.runtime_path.clone(),
         log,
+        // The installer gets no overlay.
+        extra_env: Vec::new(),
     };
     let installer_path = fs::canonicalize(installer)
         .with_context(|| format!("could not read {}", installer.display()))?;

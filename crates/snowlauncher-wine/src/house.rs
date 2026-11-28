@@ -38,6 +38,8 @@ pub struct UmuRunner {
     pub runtime: PathBuf,
     /// Output of the Wine tools goes here, for diagnosis.
     pub log: PathBuf,
+    /// More environment on top of the house's (e.g. `MANGOHUD=1`).
+    pub extra_env: Vec<(String, String)>,
 }
 
 impl UmuRunner {
@@ -57,6 +59,7 @@ impl UmuRunner {
             .env("GAMEID", "umu-default")
             .env("PROTONPATH", &self.runtime)
             .envs(HOUSE_ENV.iter().copied())
+            .envs(self.extra_env.iter().map(|(key, value)| (key, value)))
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log);
@@ -112,6 +115,20 @@ pub enum OpenHouseError {
     Record(#[from] HouseError),
 }
 
+/// The performance options' environment, from the user's config. A
+/// missing or broken config means the defaults (all off): opening
+/// Battle.net never fails because of it.
+fn performance_env_from_config() -> Vec<(String, String)> {
+    let performance = crate::config_file::default_config_path()
+        .and_then(|path| crate::config_file::read_config(&path).ok().flatten())
+        .map(|loaded| loaded.config.performance)
+        .unwrap_or_default();
+    snowlauncher_core::house::performance_env(&performance)
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect()
+}
+
 /// Reads the house's record and prepares a runner for it, with the
 /// house's environment. Shared by `snowctl` and the GUI.
 pub fn open_house() -> Result<(HouseRecordView, UmuRunner), OpenHouseError> {
@@ -124,6 +141,7 @@ pub fn open_house() -> Result<(HouseRecordView, UmuRunner), OpenHouseError> {
         prefix: prefix.clone(),
         runtime: record.runtime_path.clone(),
         log: open_log_path().ok_or(OpenHouseError::NoStateDir)?,
+        extra_env: performance_env_from_config(),
     };
     Ok((
         HouseRecordView {
@@ -1160,6 +1178,7 @@ mod tests {
             prefix: PathBuf::from("/pfx"),
             runtime: PathBuf::from("/runtime"),
             log: tmp.path().join("log"),
+            extra_env: Vec::new(),
         };
         let command = runner.command(&["Battle.net-Setup.exe"]).unwrap();
         let envs: Vec<(String, String)> = command
@@ -1187,6 +1206,7 @@ mod tests {
             prefix: tmp.path().to_owned(),
             runtime: PathBuf::from("/runtime"),
             log: tmp.path().join("log"),
+            extra_env: Vec::new(),
         };
         let error = play_game(&runner, "WoWF").unwrap_err().to_string();
         assert!(error.contains("not installed"), "{error}");
@@ -1200,6 +1220,7 @@ mod tests {
             prefix: tmp.path().to_owned(),
             runtime: PathBuf::from("/runtime"),
             log: tmp.path().join("log"),
+            extra_env: Vec::new(),
         };
         let error = run_battlenet(&runner, &[]).unwrap_err().to_string();
         assert!(error.contains("not installed"), "{error}");

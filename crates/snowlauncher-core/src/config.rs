@@ -24,6 +24,12 @@
 //! library = "~/Games/SnowLauncher"
 //! # Proton to use. Defaults to the newest GE-Proton found.
 //! # runtime = "~/.local/share/Steam/compatibilitytools.d/GE-Proton11-14-x86_64"
+//!
+//! [performance]
+//! # Your own MangoHud overlay in the games (from the next Battle.net start).
+//! mangohud = false
+//! # Feral GameMode while a game runs (only the game, never Battle.net).
+//! gamemode = false
 //! ```
 
 use std::fmt;
@@ -45,6 +51,7 @@ pub struct Config {
     pub sleep: SleepConfig,
     pub display: DisplayConfig,
     pub house: HouseConfig,
+    pub performance: PerformanceConfig,
 }
 
 impl Default for Config {
@@ -55,6 +62,7 @@ impl Default for Config {
             sleep: SleepConfig::default(),
             display: DisplayConfig::default(),
             house: HouseConfig::default(),
+            performance: PerformanceConfig::default(),
         }
     }
 }
@@ -74,6 +82,17 @@ pub struct SleepConfig {
 pub struct DisplayConfig {
     /// UI scale of the Battle.net app and installer (see `display`).
     pub ui_scale: UiScale,
+}
+
+/// Third-party tools the user installed, off by default (`project.md`,
+/// section 2). Snow only turns them on the standard way (experiment E15).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct PerformanceConfig {
+    /// `MANGOHUD=1` for Battle.net; the games it opens inherit it (O16).
+    pub mangohud: bool,
+    /// `snowd` registers each game's process with GameMode while it runs.
+    pub gamemode: bool,
 }
 
 /// Snow Launcher's own Battle.net environment (the "house").
@@ -229,6 +248,11 @@ mod tests {
             Some(PathBuf::from("~/Games/Snow"))
         );
         assert_eq!(loaded.config.house.runtime, None);
+        assert!(loaded.warnings.is_empty());
+        assert_eq!(loaded.config.performance, PerformanceConfig::default());
+
+        let loaded = parse("[performance]\nmangohud = true\ngamemode = true\n").unwrap();
+        assert!(loaded.config.performance.mangohud && loaded.config.performance.gamemode);
         assert!(loaded.warnings.is_empty());
     }
 
