@@ -628,6 +628,7 @@ Pendente:
   - funcionar também com desenho por software (sem GPU);
   - uma ilustração SVG nunca pode derrubar o app se faltar o `librsvg`;
   - **compilar o AppImage oficial no Ubuntu 24.04** (o CI usa `ubuntu-24.04`): um binário da GUI compilado no Fedora já exige glibc 2.39, sem nenhuma margem.
+- **Montagem (feita):** `packaging/appimage/build.sh` compila os três programas num contêiner **Ubuntu 24.04** (`packaging/appimage/Containerfile`: Rust pelo `rustup-init` com versão fixada e SHA-256 conferido; toolchain fixado em 1.88.0 via `RUSTUP_TOOLCHAIN`, que vence o `stable` do `rust-toolchain.toml`) e monta a AppImage (`assemble.sh`): os programas, o atalho, o ícone e o metainfo; o `AppRun` escolhe o programa pelo primeiro argumento (`snowd`, `snowctl`; sem argumento, a janela); o runtime `type2-runtime` fixado e com a assinatura conferida; squashfs com zstd. Resultado: `target/appimage/Snow_Launcher-<versão>-x86_64.AppImage` (7,6 MB) e o `.sha256`. Os binários exigem no máximo glibc 2.39. Testada no Fedora 45 (montada via FUSE) e no Ubuntu 24.04 (extrair e rodar).
 - **Atualização**: publicar `.zsync` e informações de update embutidas (compatível com AppImageUpdate/Gear Lever).
 - **Integração com systemd + AppImage**: a unidade do serviço precisa apontar para o caminho do AppImage, que pode mudar. A cada execução, o app confere `$APPIMAGE` e **atualiza a unidade se o caminho mudou**.
 - **Como foi instalado** (`snowlauncher_core::packaging::InstallKind`, decidido pelo `$APPIMAGE` e pelo caminho do executável):
