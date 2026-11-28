@@ -173,6 +173,16 @@ enum HouseAction {
         #[command(subcommand)]
         action: RuntimeAction,
     },
+    /// List the prefix backups, or put one back in place of the house's
+    /// prefix (the current one is kept aside). Only with the house closed.
+    RestorePrefix {
+        /// Backup name (`prefix-1795833065`) or path. Without it, list them.
+        backup: Option<PathBuf>,
+
+        /// Only show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Remove the house. Never deletes games.
     Remove {
         /// Only show what would be done.
@@ -254,6 +264,9 @@ fn main() -> Result<()> {
                     action: RuntimeAction::Set { name, dry_run },
                 },
         } => house::runtime_set(&name, dry_run, &mut io::stdout().lock()),
+        Command::House {
+            action: HouseAction::RestorePrefix { backup, dry_run },
+        } => house::restore_prefix(backup.as_deref(), dry_run, &mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Quit { dry_run },
         } => house::quit(dry_run, &mut io::stdout().lock()),

@@ -238,7 +238,7 @@ O usuário pode usar o Proton que quiser, mas o Snow continua recomendando a ver
 **Regras de segurança:**
 - A lista mostra **"Recomendada (testada com o Battle.net)"** em destaque. As outras aparecem como **"Não testada pelo Snow"**, com aviso ao selecionar.
 - **Backup do prefixo antes de trocar de versão.** Um Proton mais novo atualiza o prefixo, e voltar para uma versão mais velha pode quebrar sem esse backup. Trocar de volta oferece restaurar o backup.
-  - **Feito no `snowctl house runtime set`** (O15): cópia por reflink (`cp -a --reflink=auto`, instantânea no Btrfs/XFS) em `~/.local/share/snow-launcher/backups/prefix-<hora>`, mais o backup do registro. Só com a casinha vazia. Falta o comando de restaurar o prefixo.
+  - **Feito no `snowctl house runtime set`** (O15): cópia por reflink (`cp -a --reflink=auto`, instantânea no Btrfs/XFS) em `~/.local/share/snow-launcher/backups/prefix-<hora>`, mais o backup do registro. Só com a casinha vazia. Restaurar: `snowctl house restore-prefix [backup]` (sem argumento lista os backups), que guarda o prefixo atual em `backups/prefix-replaced-<hora>` antes de pôr a cópia do backup no lugar; testado na casinha real (0,22 s, e o Battle.net abriu e logou no prefixo restaurado).
 - Se a versão escolhida for removida do sistema (por exemplo, apagada no ProtonPlus), o Snow avisa e oferece voltar para a recomendada, em vez de falhar ao abrir.
 - A versão recomendada vem do repositório de quirks, para poder mudar sem lançar versão nova do app.
 
