@@ -583,7 +583,8 @@ async fn quit() -> Result<(), String> {
             names.join(", ")
         )),
         QuitOutcome::StillOpen => Err(format!(
-            "Battle.net was asked to close but is still open after {} s.",
+            "Battle.net was asked to close but is still open after {} s. If it is stuck, \
+             `snowctl house quit --force` closes it step by step.",
             QUIT_TIMEOUT.as_secs()
         )),
     }
