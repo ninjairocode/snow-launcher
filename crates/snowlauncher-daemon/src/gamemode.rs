@@ -1,0 +1,205 @@
+//! Feral GameMode while a game runs (`[performance] gamemode`, off by
+//! default). Validated in experiment E15 (O16): GameMode registers a
+//! process by its pid over D-Bus, so `snowd`, which already sees the games,
+//! registers only the game's processes and removes them when they end.
+//! No `gamemoderun`, no `LD_PRELOAD` (a problem inside umu's container),
+//! and Battle.net never gets game mode.
+
+use std::future::Future;
+
+use snowlauncher_core::process::Pid;
+use tracing::{debug, info, warn};
+
+/// GameMode's D-Bus service, behind a trait for tests.
+pub trait GameModeClient {
+    type Error: std::fmt::Display;
+
+    fn register(&mut self, pid: Pid) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn unregister(&mut self, pid: Pid) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+/// Keeps GameMode's registrations in step with the running games.
+pub struct GameModeSession<C> {
+    client: C,
+    enabled: bool,
+    registered: Vec<Pid>,
+    /// Warn once, not every poll, while GameMode is unavailable.
+    warned: bool,
+}
+
+impl<C: GameModeClient> GameModeSession<C> {
+    pub fn new(client: C, enabled: bool) -> Self {
+        Self {
+            client,
+            enabled,
+            registered: Vec::new(),
+            warned: false,
+        }
+    }
+
+    /// Registers new game processes and unregisters the ones that ended.
+    pub async fn update(&mut self, games: &[Pid]) {
+        if !self.enabled {
+            return;
+        }
+        let gone: Vec<Pid> = self
+            .registered
+            .iter()
+            .copied()
+            .filter(|pid| !games.contains(pid))
+            .collect();
+        for pid in gone {
+            // GameMode drops a process that ended by itself, and then
+            // answers -1 here: expected, so only for debugging.
+            if let Err(error) = self.client.unregister(pid).await {
+                debug!(pid = pid.0, %error, "GameMode: already unregistered");
+            }
+            self.registered.retain(|registered| *registered != pid);
+        }
+        for &pid in games {
+            if self.registered.contains(&pid) {
+                continue;
+            }
+            match self.client.register(pid).await {
+                Ok(()) => {
+                    info!(pid = pid.0, "GameMode on for the game");
+                    self.registered.push(pid);
+                    self.warned = false;
+                }
+                Err(error) if !self.warned => {
+                    warn!(%error, "GameMode is enabled but could not be used (is gamemode installed?)");
+                    self.warned = true;
+                }
+                Err(_) => {}
+            }
+        }
+    }
+}
+
+#[zbus::proxy(
+    interface = "com.feralinteractive.GameMode",
+    default_service = "com.feralinteractive.GameMode",
+    default_path = "/com/feralinteractive/GameMode"
+)]
+trait GameMode {
+    #[zbus(name = "RegisterGameByPID")]
+    fn register_game_by_pid(&self, caller: i32, game: i32) -> zbus::Result<i32>;
+    #[zbus(name = "UnregisterGameByPID")]
+    fn unregister_game_by_pid(&self, caller: i32, game: i32) -> zbus::Result<i32>;
+}
+
+/// The real GameMode, on the session bus.
+pub struct DbusGameMode {
+    session_bus: zbus::Connection,
+}
+
+impl DbusGameMode {
+    pub fn new(session_bus: zbus::Connection) -> Self {
+        Self { session_bus }
+    }
+
+    async fn call(&self, pid: Pid, register: bool) -> zbus::Result<()> {
+        let invalid = || zbus::Error::Failure(format!("pid {} out of range", pid.0));
+        let game = i32::try_from(pid.0).map_err(|_| invalid())?;
+        let caller = i32::try_from(std::process::id()).map_err(|_| invalid())?;
+        let proxy = GameModeProxy::new(&self.session_bus).await?;
+        let status = if register {
+            proxy.register_game_by_pid(caller, game).await?
+        } else {
+            proxy.unregister_game_by_pid(caller, game).await?
+        };
+        // GameMode answers 0 on success and -1 on a refusal.
+        if status < 0 {
+            return Err(zbus::Error::Failure(format!(
+                "GameMode refused pid {} (status {status})",
+                pid.0
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl GameModeClient for DbusGameMode {
+    type Error = zbus::Error;
+
+    async fn register(&mut self, pid: Pid) -> zbus::Result<()> {
+        self.call(pid, true).await
+    }
+
+    async fn unregister(&mut self, pid: Pid) -> zbus::Result<()> {
+        self.call(pid, false).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Records calls; refuses everything while `broken`.
+    #[derive(Default)]
+    struct FakeGameMode {
+        calls: Vec<String>,
+        broken: bool,
+    }
+
+    impl GameModeClient for FakeGameMode {
+        type Error = String;
+
+        fn register(&mut self, pid: Pid) -> impl Future<Output = Result<(), String>> + Send {
+            self.calls.push(format!("register {}", pid.0));
+            let result = if self.broken {
+                Err("no gamemoded".to_owned())
+            } else {
+                Ok(())
+            };
+            std::future::ready(result)
+        }
+
+        fn unregister(&mut self, pid: Pid) -> impl Future<Output = Result<(), String>> + Send {
+            self.calls.push(format!("unregister {}", pid.0));
+            std::future::ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn follows_the_games() {
+        let mut session = GameModeSession::new(FakeGameMode::default(), true);
+        session.update(&[Pid(10)]).await;
+        session.update(&[Pid(10)]).await; // same game: nothing new
+        session.update(&[Pid(10), Pid(11)]).await;
+        session.update(&[]).await;
+        assert_eq!(
+            session.client.calls,
+            [
+                "register 10",
+                "register 11",
+                "unregister 10",
+                "unregister 11"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn off_means_no_calls() {
+        let mut session = GameModeSession::new(FakeGameMode::default(), false);
+        session.update(&[Pid(10)]).await;
+        assert!(session.client.calls.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unavailable_gamemode_is_retried_quietly() {
+        let mut session = GameModeSession::new(
+            FakeGameMode {
+                broken: true,
+                ..FakeGameMode::default()
+            },
+            true,
+        );
+        session.update(&[Pid(10)]).await;
+        session.update(&[Pid(10)]).await;
+        // Not registered, so retried each poll; warned only once.
+        assert_eq!(session.client.calls, ["register 10", "register 10"]);
+        assert!(session.warned);
+        assert!(session.registered.is_empty());
+    }
+}

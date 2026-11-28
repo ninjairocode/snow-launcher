@@ -15,6 +15,7 @@
 
 mod connections;
 mod dbus;
+mod gamemode;
 mod games;
 mod logind;
 mod networkmanager;
@@ -41,6 +42,7 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::connections::ConnectionMonitor;
+use crate::gamemode::{DbusGameMode, GameModeSession};
 use crate::games::{GameGuard, watch_games};
 use crate::logind::LogindSleepMonitor;
 use crate::networkmanager::NmNetworkMonitor;
@@ -129,6 +131,11 @@ async fn main() -> Result<()> {
         DesktopNotifier::new(session_bus.clone()),
     );
 
+    let mut gamemode = GameModeSession::new(
+        DbusGameMode::new(session_bus.clone()),
+        config.performance.gamemode,
+    );
+
     // D-Bus interface on the session bus, fed by the game watch.
     let (status_tx, status_rx) = tokio::sync::watch::channel(dbus::Status {
         prefix: prefix.path().display().to_string(),
@@ -142,7 +149,7 @@ async fn main() -> Result<()> {
     info!("watching suspend, resume and games");
     tokio::select! {
         result = watch_sleep(&mut sleep_monitor, &mut resume_watcher) => result?,
-        result = watch_games(&game_table, prefix.path(), &mut game_guard, &mut connections, &status_tx, GAME_POLL_INTERVAL) => result?,
+        result = watch_games(&game_table, prefix.path(), &mut game_guard, &mut connections, &mut gamemode, &status_tx, GAME_POLL_INTERVAL) => result?,
         result = dbus::publish(&session_bus, status_rx) => result?,
         () = tray::run(&session_bus, tray_status) => {}
         _ = tokio::signal::ctrl_c() => info!("interrupted, stopping"),

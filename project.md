@@ -346,12 +346,12 @@ Opções para quem usa essas ferramentas, como o mantenedor já faz no Lutris (`
 
 ```toml
 [performance]
-mangohud = false   # overlay de FPS/uso nos jogos
-gamemode = false   # otimizações do Feral GameMode enquanto joga
+mangohud = false   # overlay de FPS/uso nos jogos (o MangoHud do usuário)
+gamemode = false   # Feral GameMode enquanto um jogo roda
 ```
 
-- **MangoHud** via `MANGOHUD=1` no ambiente da casinha, com o Battle.net e o Agent na lista `blacklist` do MangoHud, para o overlay aparecer **só nos jogos** e não na janela do launcher. Ativar por jogo depende do E5 (o jogo herda o ambiente do Battle.net).
-- **GameMode** via `gamemoderun` ao iniciar a casinha.
+- **MangoHud** via `MANGOHUD=1` no ambiente com que o Snow inicia o Battle.net: os jogos abertos por ele herdam (E15, O16) e usam a configuração do próprio usuário. O Battle.net não carrega o overlay, então não precisa de `blacklist`. Vale na próxima vez que o Battle.net abrir; não dá para ligar por jogo. **Feito.**
+- **GameMode** pelo `snowd`: quando um jogo abre, ele registra **só o processo do jogo** no GameMode pelo D-Bus (`RegisterGameByPID`), e o GameMode o solta quando o jogo fecha. Sem `gamemoderun` nem `LD_PRELOAD`, que no contêiner do umu seriam um problema, e sem modo jogo no Battle.net. Lido quando o `snowd` inicia. **Feito.**
 - Se a opção estiver ligada e a ferramenta não estiver instalada, o Snow avisa (`doctor`, barra de status) em vez de falhar.
 
 ### Um prefixo por jogo ou um para todos?
@@ -693,13 +693,14 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 | E2 | GE-Proton recente com NTSYNC ativo | Melhora a resposta geral? `/dev/ntsync` está acessível no Fedora 45? | **Acessível e já em uso** pelo GE-Proton11-14, sem configuração (O5). Falta medir o ganho |
 | E3 | Letra de unidade em vez de link simbólico + versão do Windows | A loja do WoW volta a funcionar? Qual combinação? | **Forte indício: Windows 11** faz a loja abrir; a letra de unidade não foi o fator (O6). Falta o teste inverso |
 | E4 | Script que escuta `PrepareForSleep` e reinicia o Battle.net | Resolve a reconexão? Reiniciar o Battle.net com o WoW aberto causa algum problema? | Em parte: o sinal chega e o Battle.net reconecta sozinho depois de suspensões curtas (O2). Falta suspensão longa e reiniciar com o WoW aberto |
-| E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | **Metade validada** (O8): `--exec="launch WoWF"` abre o jogo (código do produto, não o *uid*). Falta: o jogo herda o ambiente? gamescope por jogo? |
+| E5 | `--exec="launch WoW"` com o Battle.net já aberto, e com gamescope | O jogo herda o ambiente de quem? Dá para aplicar gamescope por jogo sem abrir o Battle.net dentro do gamescope? | **Quase todo validado** (O8, O16): `--exec="launch WoWF"` abre o jogo (código do produto, não o *uid*), e o jogo herda o ambiente do Battle.net. Falta: gamescope por jogo |
 | E6 | Instalar o Battle.net via `umu-run` do zero, mover a pasta do WoW do Lutris para uma biblioteca mapeada como `G:` | O instalador trava? Em que ponto? O "Localizar jogo" em `G:\World of Warcraft` reaproveita os arquivos sem baixar tudo de novo? A loja do jogo funciona com o jogo em `G:`? | **Respondido** (O6): o instalador não trava (~78 s); o "Localizar jogo" reaproveitou os 49 GB; o jogo roda em `G:`; a loja abre com Windows 11. Testado com `G:` apontando para a pasta existente, sem mover |
 | E7 | AppImage mínimo com GTK4/libadwaita | Roda em Fedora, Ubuntu LTS e Arch? | **Validado** (O10, O11): com o GTK do sistema, nas três. A quebra de layout vista no Ubuntu era o contêiner sem `gtk-xft-dpi` (O11), não a libadwaita 1.5. Não testados: Ubuntu de verdade (com GPU e FUSE), Ubuntu 22.04, sessão X11 |
 | E8 | DPI do Wine igual ao `Xft.dpi` do desktop (192 com GNOME a 125%) contra 144 e 96 | O Battle.net e o instalador ficam do mesmo tamanho que os outros aplicativos? Qual é o melhor padrão automático? | **Validado no GNOME 125%** (O7): `Xft.dpi` (192) ficou ideal. Faltam outras escalas, KDE, X11 e vários monitores |
 | E9 | Esconder o ícone do Battle.net na bandeja (Wine/Battle.net) e reabrir a janela por fora (rodar o `Battle.net.exe` de novo com ele já aberto) | Dá para esconder? A janela volta quando o Battle.net está só na bandeja? | **Validado** (O8, O14): a janela volta, e o ícone some com a política `NoTrayItemsDisplay` (E14) |
 | E11 | Instalador e login a 192 DPI com `QT_ENABLE_HIGHDPI_SCALING=0` | Por que o instalador trava e o login quebra a 192? Dá para manter 192? | **Resolvido** (O9): o modo de alta densidade do Qt 5.15 sob o Wine; desligado, tudo funciona e fica legível a 192 |
 | E12 | Item próprio na bandeja (StatusNotifierItem + dbusmenu via `zbus`) no GNOME com AppIndicator | O ícone aparece nítido a 192 DPI? O menu e os cliques funcionam? | **Validado** (O12): ícone nítido por nome com SVG solto no `IconThemePath`; menu e cliques ok; clique esquerdo abre o menu |
+| E15 | MangoHud e GameMode do sistema com o umu | O jogo enxerga o MangoHud instalado? Dá para ligar o GameMode só no jogo? | **Validado** (O16): o jogo herda `MANGOHUD=1` do Battle.net e carrega o MangoHud do sistema; o GameMode aceita registrar o processo do jogo pelo D-Bus |
 | E10 | Fechar o Battle.net por fora (`taskkill` sem `/f`, depois `wineserver -k`) e mapear nos logs as etapas da inicialização | Fecha de verdade ou só vai para a bandeja? O Agent sai junto? Quais linhas de log marcam "aguardando login" e "pronto"? | **Validado** (O8): fecha de verdade, o Agent sai em ~10 s, marcas mapeadas |
 
 ## 14 – Riscos
