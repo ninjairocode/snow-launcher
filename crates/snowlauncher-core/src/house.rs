@@ -90,6 +90,9 @@ pub enum HouseStep {
     SetDpi {
         dpi: u32,
     },
+    /// Battle.net's blurry tray icon goes; Snow's own item replaces it
+    /// (E14). Undone with `snowctl house battlenet-icon show`.
+    HideTrayIcons,
     CreateLibrary {
         path: PathBuf,
     },
@@ -120,6 +123,10 @@ impl fmt::Display for HouseStep {
                 f,
                 "set the UI scale to {dpi} DPI ({} registry values)",
                 DPI_REGISTRY_KEYS.len()
+            ),
+            Self::HideTrayIcons => write!(
+                f,
+                "hide Battle.net's tray icon (Snow's own icon replaces it)"
             ),
             Self::CreateLibrary { path } => {
                 write!(f, "create the game library folder {}", path.display())
@@ -249,6 +256,7 @@ pub fn plan_house(inputs: &HouseInputs, existing: Existing) -> Result<Vec<HouseS
         HouseStep::SetDpi {
             dpi: inputs.dpi.dpi,
         },
+        HouseStep::HideTrayIcons,
     ];
     if !existing.library {
         steps.push(HouseStep::CreateLibrary {
@@ -347,6 +355,7 @@ mod tests {
                 "create the Wine prefix /home/u/.local/share/snow-launcher/prefixes/battlenet with umu-run and GE-Proton11-14-x86_64",
                 "set the Windows version to win11 (winecfg -v win11)",
                 "set the UI scale to 192 DPI (3 registry values)",
+                "hide Battle.net's tray icon (Snow's own icon replaces it)",
                 "create the game library folder /home/u/Games/SnowLauncher",
                 "map G: to /home/u/Games/SnowLauncher",
             ]
