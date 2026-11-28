@@ -270,6 +270,19 @@ pub fn plan_house(inputs: &HouseInputs, existing: Existing) -> Result<Vec<HouseS
     Ok(steps)
 }
 
+/// Whether `snowd`, starting, opens Battle.net: the option is on, the
+/// house has Battle.net, it is not open yet, and it was not opened at a
+/// start earlier in this session (a `snowd` restarted mid-session must not
+/// open it again out of the blue).
+pub fn opens_battlenet_at_start(
+    enabled: bool,
+    house_ready: bool,
+    battlenet_running: bool,
+    opened_this_session: bool,
+) -> bool {
+    enabled && house_ready && !battlenet_running && !opened_this_session
+}
+
 /// Extra environment for Battle.net from the performance options: the
 /// games it opens inherit it (O16).
 pub fn performance_env(
@@ -446,6 +459,15 @@ mod tests {
             plan_house(&inside, NEW),
             Err(PlanError::LibraryInsidePrefix(_))
         ));
+    }
+
+    #[test]
+    fn opens_battlenet_once_per_session_and_only_when_asked() {
+        assert!(opens_battlenet_at_start(true, true, false, false));
+        assert!(!opens_battlenet_at_start(false, true, false, false)); // off
+        assert!(!opens_battlenet_at_start(true, false, false, false)); // no house
+        assert!(!opens_battlenet_at_start(true, true, true, false)); // open already
+        assert!(!opens_battlenet_at_start(true, true, false, true)); // done this session
     }
 
     #[test]

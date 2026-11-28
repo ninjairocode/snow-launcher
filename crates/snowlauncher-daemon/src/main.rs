@@ -13,6 +13,7 @@
 //! Restarting Battle.net comes later, once experiment E4 confirms the
 //! approach.
 
+mod autostart;
 mod connections;
 mod dbus;
 mod gamemode;
@@ -150,6 +151,9 @@ async fn main() -> Result<()> {
     let tray_status = status_rx.clone();
 
     let mut sigterm = signal(SignalKind::terminate()).context("failed to listen for SIGTERM")?;
+
+    // Off the main loop: opening Battle.net must not delay the watching.
+    tokio::spawn(autostart::run(config.startup.open_battlenet));
 
     info!("watching suspend, resume and games");
     tokio::select! {

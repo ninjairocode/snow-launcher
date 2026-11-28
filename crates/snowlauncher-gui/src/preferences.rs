@@ -63,10 +63,10 @@ fn backup_dir() -> Option<PathBuf> {
 }
 
 /// Writes one switch; the error text is for a toast.
-fn save(key: &str, value: bool) -> Result<(), String> {
+fn save(section: &str, key: &str, value: bool) -> Result<(), String> {
     let path = default_config_path().ok_or("could not find the config folder")?;
     let backups = backup_dir().ok_or("could not find the state folder")?;
-    set_config_bool(&path, "performance", key, value, &backups)
+    set_config_bool(&path, section, key, value, &backups)
         .map(|_| ())
         .map_err(|error| error.to_string())
 }
@@ -94,7 +94,7 @@ fn switch_row(
         if reverting.get() {
             return;
         }
-        let Err(problem) = save(key, row.is_active()) else {
+        let Err(problem) = save("performance", key, row.is_active()) else {
             return;
         };
         reverting.set(true);
@@ -317,7 +317,35 @@ fn startup_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
     });
     let group = adw::PreferencesGroup::builder().title("Startup").build();
     group.add(&row);
+    group.add(&open_battlenet_row(dialog));
     group
+}
+
+/// "Open Battle.net when Snow starts" (`[startup] open_battlenet`).
+fn open_battlenet_row(dialog: &adw::PreferencesDialog) -> adw::SwitchRow {
+    let on = default_config_path()
+        .and_then(|path| read_config(&path).ok().flatten())
+        .is_some_and(|loaded| loaded.config.startup.open_battlenet);
+    let row = adw::SwitchRow::builder()
+        .title("Open Battle.net when Snow starts")
+        .subtitle("Once per session: at login, or when this window starts Snow.")
+        .active(on)
+        .build();
+    let reverting = Rc::new(Cell::new(false));
+    let toasts = dialog.downgrade();
+    row.connect_active_notify(move |row| {
+        if reverting.get() {
+            return;
+        }
+        let Err(problem) = save("startup", "open_battlenet", row.is_active()) else {
+            return;
+        };
+        reverting.set(true);
+        row.set_active(!row.is_active());
+        reverting.set(false);
+        toast(&toasts, format!("Could not save: {problem}"));
+    });
+    row
 }
 
 /// Builds the dialog with the settings as they are now.
