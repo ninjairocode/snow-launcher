@@ -370,3 +370,24 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 - Para "Jogar" com o Battle.net fechado, abrir o Battle.net primeiro, esperar o login (as marcas do E10) e só então pedir o jogo. A causa da parada (3) fica para um experimento próprio.
   - **Feito** (`play_game`, usado pela GUI, pela bandeja e pelo `snowctl play`): com o Battle.net fechado, o Battle.net logou e o Snow pediu o jogo em 16 s; o WoW estava rodando em **18 s**.
 - Detectar um lançamento em andamento (pelo log) antes de fechar fica como melhoria do `quit`.
+
+## O14 – E14: esconder o ícone do Battle.net na bandeja
+
+**Data:** 2026-11-27
+**Ambiente:** a casinha (GE-Proton11-14), GNOME 51 com AppIndicator e o item do Snow na bandeja.
+
+### Resultados
+
+1. O `explorer.exe` do GE-Proton traz os textos `NoTrayItemsDisplay` e `ShowSystray`. O `NoTrayItemsDisplay` é a política do Windows "não mostrar itens na área de notificação", em `HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer`. A chave não existia na casinha.
+2. Com o Battle.net fechado e sem `wineserver` na casinha, o valor foi gravado com o `reg` do próprio Wine (`reg add … /v NoTrayItemsDisplay /t REG_DWORD /d 1 /f`), com backup do `user.reg` antes.
+3. Ao abrir o Battle.net pelo Snow:
+   - **o ícone do Battle.net sumiu** da barra, e só o do Snow ficou;
+   - **a janela abriu normalmente**, apesar do `AutoStartMinimized` do Battle.net (o log dizia `isMinimizedOnStartup=true`), então ele não ficou preso num ícone que não existe;
+   - **fechar no "X" e reabrir pelo menu do Snow funcionou** (o mesmo caminho do E9).
+4. **Ler o estado pelo `user.reg` engana** com a casinha rodando: depois de um `reg delete`, o arquivo ainda mostrava o valor antigo mais de 5 s depois, porque o Wine grava o registro só mais tarde. O estado é lido com `reg query`, que pergunta ao próprio Wine.
+
+### Consequências
+
+- `snowctl house battlenet-icon hide|show|status`: backup da chave com `reg export` (quando ela existe), mudança com `reg add`/`reg delete` e conferência com `reg query`. O `show` é a reversão.
+- A mudança vale na próxima vez que a casinha iniciar do zero (o `explorer.exe` lê a política ao iniciar).
+- Vale para todos os programas da casinha; nela só moram o Battle.net e o Agent.

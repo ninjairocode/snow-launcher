@@ -142,6 +142,16 @@ enum HouseAction {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Hide or show Battle.net's icon in the desktop tray (Snow's own item
+    /// replaces it), or show whether it is hidden.
+    BattlenetIcon {
+        #[arg(value_enum)]
+        action: house::IconAction,
+
+        /// Only show what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Remove the house. Never deletes games.
     Remove {
         /// Only show what would be done.
@@ -208,6 +218,9 @@ fn main() -> Result<()> {
         Command::House {
             action: HouseAction::Open { dry_run },
         } => house::open(dry_run, &mut io::stdout().lock()),
+        Command::House {
+            action: HouseAction::BattlenetIcon { action, dry_run },
+        } => house::battlenet_icon(action, dry_run, &mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Quit { dry_run },
         } => house::quit(dry_run, &mut io::stdout().lock()),

@@ -262,6 +262,44 @@ pub fn plan_house(inputs: &HouseInputs, existing: Existing) -> Result<Vec<HouseS
     Ok(steps)
 }
 
+/// Windows' policy "hide the notification area items", which Wine's
+/// `explorer.exe` honours (experiment E14). Set in the house, its programs
+/// put no icon in the desktop tray: Battle.net's blurry one goes away and
+/// Snow's own item is the way back to it (E9: running Battle.net again
+/// brings its window back).
+pub const TRAY_POLICY_KEY: &str =
+    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+pub const TRAY_POLICY_VALUE: &str = "NoTrayItemsDisplay";
+
+/// Wine `reg` arguments that hide (set the policy) or show again (delete
+/// the value, back to the default) the house's tray icons.
+pub fn tray_policy_args(hide: bool) -> Vec<String> {
+    let args: &[&str] = if hide {
+        &[
+            "reg",
+            "add",
+            TRAY_POLICY_KEY,
+            "/v",
+            TRAY_POLICY_VALUE,
+            "/t",
+            "REG_DWORD",
+            "/d",
+            "1",
+            "/f",
+        ]
+    } else {
+        &[
+            "reg",
+            "delete",
+            TRAY_POLICY_KEY,
+            "/v",
+            TRAY_POLICY_VALUE,
+            "/f",
+        ]
+    };
+    args.iter().map(|arg| (*arg).to_owned()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,5 +425,17 @@ mod tests {
             plan_house(&inside, NEW),
             Err(PlanError::LibraryInsidePrefix(_))
         ));
+    }
+
+    #[test]
+    fn tray_policy_commands() {
+        assert_eq!(
+            tray_policy_args(true).join(" "),
+            r"reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer /v NoTrayItemsDisplay /t REG_DWORD /d 1 /f"
+        );
+        assert_eq!(
+            tray_policy_args(false).join(" "),
+            r"reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer /v NoTrayItemsDisplay /f"
+        );
     }
 }
