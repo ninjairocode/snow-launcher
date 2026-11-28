@@ -18,9 +18,9 @@
 
 ---
 
-> **Early development.** Snow Launcher currently works with a Battle.net
-> prefix you already have (for example, from Lutris). There is no graphical
-> interface yet, and it does not create or install anything for you.
+> **Early development (v0.3).** Snow Launcher sets up and watches over its
+> own Battle.net environment, with a GNOME window and a tray icon. It works
+> on the maintainer's machine; expect rough edges elsewhere.
 
 ## What it is
 
@@ -28,21 +28,23 @@ Playing Blizzard games on Linux usually means running Battle.net under Wine
 or Proton through a generic launcher. It works, but it breaks in familiar
 ways. Snow Launcher is a companion focused on that one setup:
 
-- **No automatic suspend while you play.** While a game runs, the computer
-  will not go to sleep on its own (the screen can still turn off). You can
-  turn this off.
-- **Warns when a game's connection dies.** After a long enough network
-  outage (a suspend, a pulled cable, a router restart), the game server
-  drops your session, but the game keeps running and can take around 15
-  minutes to notice: you can still walk around, but nothing reaches the
-  server. Snow Launcher notices in under a minute and tells you to restart
-  the game.
-- **Explains known errors.** `snowctl doctor` reads Battle.net's own logs
-  and explains the error codes it knows, without guessing about the others.
-
-The plan is to grow into a full manager for a dedicated Battle.net
-environment, with its own Proton runtime, automatic fixes and a GNOME
-interface. See the [roadmap](project.md#12--roadmap).
+- **Its own Battle.net "house".** A Wine prefix made for Battle.net with
+  [umu](https://github.com/Open-Wine-Components/umu-launcher) and the Proton
+  you choose (GE-Proton by default, any build ProtonPlus installed), set to
+  Windows 11 and to your desktop's scale, so Battle.net is readable.
+- **Installs Battle.net safely.** It never ships or downloads Blizzard's
+  installer: you download it in your browser, and Snow checks Blizzard's
+  digital signature before running it.
+- **Brings your games.** Imports a game from Lutris or Steam into its library,
+  as an instant copy on Btrfs/XFS; the original keeps working.
+- **One click to play.** A window and a tray icon with your games (their icons
+  come from your own game files) and Battle.net's startup progress.
+- **No automatic suspend while you play**, and a **warning when a game's
+  connection dies** after an outage, instead of the game silently staying
+  offline for about 15 minutes.
+- **Optional MangoHud and GameMode**, using the ones you installed.
+- **Safe by design:** dry runs, backups before changes, a way back for
+  everything, and it never closes a running game.
 
 ## What it is not
 
@@ -51,16 +53,20 @@ interface. See the [roadmap](project.md#12--roadmap).
   official app.
 - **Not a cheat or mod tool.** It does not inject code into games, read or
   change their memory, or get around anti-cheat.
-- It only looks at processes of the Wine prefix it is configured for, so a
-  Battle.net running elsewhere (Lutris, Steam) is never touched.
+- It only touches processes of its own Wine prefix, identified by
+  `WINEPREFIX`, so a Battle.net running elsewhere (Lutris, Steam) is never
+  touched.
 
 ## Requirements
 
 - Linux with systemd (logind) and NetworkManager
-- A desktop with the XDG desktop portal and notifications (developed on
-  GNOME / Fedora)
-- An existing Wine/Proton prefix with Battle.net installed
-- [Rust](https://rustup.rs/) 1.85 or newer, to build it
+- GNOME with the AppIndicator extension for the tray icon (developed on
+  Fedora; the minimum base is Ubuntu 24.04: GTK 4.14, libadwaita 1.5)
+- [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher) (or
+  Lutris, which bundles it) and a GE-Proton build (for example, from
+  ProtonPlus)
+- [Rust](https://rustup.rs/) 1.85 or newer, plus the GTK 4 and libadwaita
+  development packages, to build it
 
 ## Install from source
 
@@ -69,44 +75,37 @@ git clone https://github.com/ninjairocode/snow-launcher.git
 cd snow-launcher
 cargo install --locked --path crates/snowlauncher-daemon   # snowd
 cargo install --locked --path crates/snowlauncher-cli      # snowctl
+cargo install --locked --path crates/snowlauncher-gui      # the window
+snowctl service install   # snowd as a user service, started with your session
 ```
 
-Tell it where your Battle.net prefix is, in
-`~/.config/snow-launcher/config.toml`:
-
-```toml
-schema = 1
-prefix = "~/Games/battlenet"
-
-[sleep]
-# Set to true to let the computer suspend automatically even while playing.
-allow_suspend_while_playing = false
-```
-
-Then run the daemon as a user service, so it starts with your session:
+## Getting started
 
 ```sh
-snowctl service install --dry-run   # shows what it would do
-snowctl service install
+snowctl house create --dry-run    # shows what it would do
+snowctl house create              # the house: prefix, Windows 11, scale
 ```
 
-To remove it: `snowctl service uninstall`.
-
-## Usage
+Then open **Snow Launcher**: download Battle.net's installer in your browser
+("Open download page"), press **Install Battle.net**, log in, and import or
+install your games. Everything is also in `snowctl` (`snowctl --help`):
 
 ```sh
-snowctl status    # Battle.net and game processes, and what snowd is seeing
-snowctl doctor    # known problems in Battle.net's recent logs
-journalctl --user -u snowd -f   # the daemon's log
+snowctl status            # what snowd is seeing
+snowctl games             # the library's games
+snowctl play wowf         # open a game through Battle.net
+snowctl import            # games other launchers have
+snowctl doctor            # known problems in Battle.net's recent logs
 ```
 
 ## How it works
 
-- `snowd`, a small daemon, watches the prefix's processes, listens to
-  suspend and resume (logind) and to the network (NetworkManager), asks the
-  desktop not to suspend while a game runs, and reads the games' TCP
-  connection state from `/proc` (no root needed).
-- `snowctl` is the command-line tool.
+- `snowd`, a small daemon, watches the house's processes, listens to suspend
+  and resume (logind) and to the network (NetworkManager), asks the desktop
+  not to suspend while a game runs, reads the games' TCP connection state
+  from `/proc` (no root needed), and shows the tray icon.
+- `snowctl` is the command-line tool; `snow-launcher` is the GNOME window
+  (Relm4 and libadwaita).
 - They talk over D-Bus, on the session bus
   (`io.github.ninjairocode.SnowLauncher1`).
 

@@ -149,7 +149,7 @@ snow-launcher/
 |---|---|
 | `~/.config/snow-launcher/config.toml` | Configuração do usuário |
 | `~/.local/share/snow-launcher/prefixes/<nome>/` | Prefixos Wine gerenciados |
-| `~/.local/share/snow-launcher/runtimes/` | Versões do GE-Proton baixadas |
+| `~/.local/share/snow-launcher/runtimes/` | Protons colocados ali pelo usuário (o Snow não baixa; ver 12.2) |
 | `~/.local/share/snow-launcher/quirks/` | Cache do repositório de correções |
 | `~/.local/state/snow-launcher/` | Logs, histórico de correções aplicadas, backups |
 | `~/.cache/snow-launcher/` | Downloads temporários |
@@ -159,7 +159,7 @@ snow-launcher/
 
 A casinha é um **prefixo Wine controlado pelo Snow Launcher**. Ela inclui:
 
-- **Runtime fixado**: uma versão do GE-Proton testada e fixada, com **voltar para a anterior em um clique** se uma atualização quebrar algo. O usuário pode escolher outra versão (ver "Escolha do Proton e integração com o ProtonPlus").
+- **Runtime fixado**: o Proton gravado no registro da casinha não muda sozinho, e trocar faz backup do prefixo, com **volta segura** (`restore-prefix`) se algo quebrar. O usuário pode escolher outra versão (ver "Escolha do Proton e integração com o ProtonPlus"); o Snow não baixa Protons (ver 12.2).
 - **Ajustes padrão do prefixo**:
   - Aceleração por hardware do navegador do Battle.net **desligada**.
   - **Windows 11** (`winecfg -v win11`): forte indício de que a loja do jogo depende disso (`docs/experimentos.md`, O6). Falta o teste inverso para confirmar.
@@ -664,11 +664,11 @@ Assisted-by: Claude (Anthropic)
 |---|---|---|
 | **v0.0** | Experimentos (seção 13) na máquina do mantenedor. Sem app ainda | Parcial: E4 em parte, mais as observações O1–O4 |
 | **v0.1** | `snowd` + `snowctl` (CLI): detectar um prefixo existente (ex.: do Lutris), vigiar processos, sleep-hook, sem suspensão automática com jogo aberto + aviso de conexão perdida, `config.toml` básico, correção do erro do Agent, `snowctl status`, `snowctl doctor` | **Quase pronta** (ver 12.1) |
-| **v0.2** | Casinha própria: criar prefixo via umu, baixar e verificar GE-Proton, fixar e voltar versão, instalar Battle.net (download oficial, arquivo local ou importação de instalação existente, ver seção 5), aplicar ajustes padrão (Windows 11, **escala automática**), opções globais de **MangoHud e GameMode** | Em andamento (O9): `house create`/`remove`, `install-battlenet` com assinatura verificada e vigia, `house open`, Windows 11, DPI do desktop com a correção do Qt. Faltam: GE-Proton próprio (baixar/fixar/voltar), importação como comando, MangoHud/GameMode |
-| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar" e os **ícones dos jogos tirados dos executáveis**, tela de progresso de inicialização com o Snow e as luzinhas, configurações, notificações, portal Background, **bandeja só com o Snow** (ícone simbólico; esconder o do Battle.net depende do E9), controle do Battle.net validado (E5, E9, E10) | Não começou; identidade visual desenhada |
+| **v0.2** | Casinha própria: criar prefixo via umu, Proton escolhido, fixado e com volta segura, instalar Battle.net (instalador verificado, arquivo local ou importação de jogos, ver seção 5), aplicar ajustes padrão (Windows 11, **escala automática**), opções globais de **MangoHud e GameMode** | **Pronta** (ver 12.2) |
+| **v0.3** | GUI (Relm4/libadwaita): barra de status, tela de jogos instalados com "Jogar" e os **ícones dos jogos tirados dos executáveis**, tela de progresso de inicialização com o Snow e as luzinhas, configurações, notificações, **bandeja só com o Snow**, controle do Battle.net validado (E5, E9, E10) | **Quase pronta** (ver 12.3); falta o polimento visual |
 | **v0.4** | Repositório de quirks remoto e assinado, lista de jogos com status de compatibilidade, desfazer correções | Não começou |
-| **v0.5** | Gamescope por jogo, MangoHud por jogo, perfis isolados por jogo, escolha do Proton (pastas da Steam/ProtonPlus) com backup do prefixo | Não começou |
-| **v0.6** | Exportar diagnóstico, internacionalização (pt-BR e en), ícone simbólico, polimento | Não começou |
+| **v0.5** | Gamescope por jogo, perfis isolados por jogo (MangoHud por jogo não dá: o jogo herda o ambiente do Battle.net, O16) | Não começou. A escolha do Proton com backup do prefixo veio antes, na v0.2 |
+| **v0.6** | Exportar diagnóstico, internacionalização (pt-BR e en), polimento | Não começou. O ícone simbólico saiu do plano: o mantenedor prefere o colorido, e ele ficou nítido na bandeja (E12) |
 | **v1.0** | Estável. Avaliar COPR, AUR e repositório Flatpak próprio | Não começou |
 
 ### 12.1 Estado da v0.1 (2026-11-27)
@@ -688,7 +688,22 @@ Assisted-by: Claude (Anthropic)
 
 - **Reiniciar Battle.net e Agent ao acordar:** nos testes, o Battle.net se reconectou sozinho depois de suspensões curtas (O2). Implementar só quando o uso real mostrar o problema; os logs do serviço ficam no journal para isso
 - **Correção automática do `BLZBNTBNA00000005`:** o código aparece em toda inicialização sem afetar nada (O4). A correção só deve agir com sintoma visível (seção 8)
-- Encerramento gradual de processos (`wineserver -k`, SIGTERM, SIGKILL), pré-requisito das duas acima
+- ~~Encerramento gradual de processos~~: **feito** no `snowctl house quit --force` (pedido normal, SIGTERM e SIGKILL pelo `wineserver` da casinha, nunca com jogo aberto; O15). Era pré-requisito das duas acima, que seguem esperando o uso real
+
+### 12.2 Estado da v0.2 (2026-11-28)
+
+**Pronto:** `house create` (umu, Windows 11, DPI do desktop, ícone do Battle.net escondido, `G:`) e `house remove`; instalação do Battle.net com o instalador verificado pela assinatura da Blizzard, a cópia guardada e a vigia; `house open`, `play` (também com o Battle.net fechado), `quit` e `quit --force`; escolha do Proton (`runtime list|set`) com backup do prefixo por reflink e `restore-prefix`; importação de jogos de outros launchers (`snowctl import`); MangoHud e GameMode (`[performance]`).
+
+**Decisões sobre o que estava pendente** (tomadas pelo Claude com a autorização do mantenedor, 2026-11-28):
+
+- **GE-Proton baixado pelo próprio Snow: substituído.** O ProtonPlus e o ProtonUp-Qt já baixam e atualizam os Protons nas pastas da Steam, e o Snow já lista todos, escolhe, **fixa** (o Proton gravado no registro da casinha não muda sozinho) e **volta atrás com segurança** (backup do prefixo por reflink e `restore-prefix`). Baixar pela rede dentro do Snow traria código de rede, verificação de releases e manutenção, sem ganho real. Fica como ideia, se usuários sem ProtonPlus pedirem. A pasta `~/.local/share/snow-launcher/runtimes/` continua sendo procurada, para quem colocar um Proton ali.
+- **`snowd` vigiando o prefixo do Lutris: cancelado.** Fazia sentido antes da casinha e da importação; agora os jogos vêm para a casinha, e é ela que o `snowd` vigia. O `--prefix` do `snowd` continua existindo para quem quiser apontar para outro prefixo.
+
+### 12.3 Estado da v0.3 (2026-11-28)
+
+**Pronto:** janela com o estado do `snowd` e da casinha, as luzinhas da inicialização (lidas do log do Battle.net), os jogos com o ícone tirado do próprio executável e "Play", "Open Battle.net", instalar o Battle.net e importar jogos pela janela, Preferências (MangoHud, GameMode, Proton, ícone do Battle.net, iniciar com a sessão, abrir o Battle.net quando o Snow inicia) e "Quit Snow Launcher"; bandeja só com o Snow (E12, E14), com "Open Snow Launcher", "Open Battle.net", "Play", "Quit Battle.net" (só com ele aberto) e "Quit Snow Launcher"; ilustrações nítidas em qualquer escala; base mínima GTK 4.14 e libadwaita 1.5 (Ubuntu 24.04, recurso `gnome_46` do Relm4).
+
+**Pendente:** o polimento visual da janela (deixado de propósito para o fim). O portal Background deixou de ser necessário: o `snowd` roda como serviço e a bandeja é dele.
 
 ## 13 – Experimentos a validar antes de codar
 
