@@ -42,7 +42,7 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::connections::ConnectionMonitor;
-use crate::gamemode::{DbusGameMode, GameModeSession};
+use crate::gamemode::{ConfigReload, DbusGameMode, GameModeSession};
 use crate::games::{GameGuard, watch_games};
 use crate::logind::LogindSleepMonitor;
 use crate::networkmanager::NmNetworkMonitor;
@@ -88,8 +88,9 @@ async fn main() -> Result<()> {
         .context("XDG_RUNTIME_DIR is not set; snowd must run inside a user session")?;
     let _instance = instance::acquire(&lock_path)?;
 
-    let config = match args.config.or_else(default_config_path) {
-        Some(path) => load_config(&path),
+    let config_path = args.config.or_else(default_config_path);
+    let config = match &config_path {
+        Some(path) => load_config(path),
         None => {
             warn!("could not determine the config directory; using defaults");
             Config::default()
@@ -135,6 +136,10 @@ async fn main() -> Result<()> {
         DbusGameMode::new(session_bus.clone()),
         config.performance.gamemode,
     );
+    // The switch in the window edits config.toml; follow it while running.
+    if let Some(path) = config_path.clone() {
+        gamemode = gamemode.following(ConfigReload::new(path));
+    }
 
     // D-Bus interface on the session bus, fed by the game watch.
     let (status_tx, status_rx) = tokio::sync::watch::channel(dbus::Status {
