@@ -146,7 +146,11 @@ const PRINT_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// `snowctl house install-battlenet`: runs the verified official installer
 /// in the house and watches it until Battle.net opens.
-pub fn install_battlenet(installer: &Path, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+pub fn install_battlenet(
+    installer: Option<&Path>,
+    dry_run: bool,
+    out: &mut impl io::Write,
+) -> Result<()> {
     let record_file = record_path().context("could not determine the state directory")?;
     let record = load_record(&record_file)?
         .context("there is no house yet; create it first with `snowctl house create`")?;
@@ -165,7 +169,8 @@ pub fn install_battlenet(installer: &Path, dry_run: bool, out: &mut impl io::Wri
         "programs are running in the house; close them first"
     );
     // Only Blizzard's installer, unmodified (project.md, section 5).
-    let report = crate::installer::check(installer)?;
+    let (installer, report) = crate::installer::choose(installer)?;
+    let installer = installer.as_path();
     let umu_run = find_umu_run()
         .context("umu-run not found: install umu-launcher (or Lutris, which bundles it)")?;
 

@@ -246,14 +246,16 @@ O usuário pode usar o Proton que quiser, mas o Snow continua recomendando a ver
 
 O Snow Launcher oferece três caminhos. O assistente de primeira execução pergunta qual usar, começando pela importação, se encontrar algo.
 
-**1 – Download automático (padrão)**
-- Baixa o `Battle.net-Setup.exe` direto do **servidor oficial da Blizzard**, na máquina do usuário, na hora da instalação.
-- **Nunca** embutir o instalador no app nem hospedar cópia (o arquivo é da Blizzard, redistribuir é problema de direitos autorais).
-- O endereço de download **não fica fixo no código**: vem do repositório de quirks, para poder ser corrigido sem lançar versão nova se a Blizzard mudar.
+**1 – Baixar pelo navegador e a cópia verificada (padrão)**
+- O Snow **não baixa** o instalador: ele **abre a página oficial de download no navegador** (`snowctl house installer download`), e o próprio usuário baixa. Assim o Snow não conversa com os servidores da Blizzard (regra do `CLAUDE.md`).
+- **Nunca** embutir o instalador no app, no repositório ou hospedar cópia (o arquivo é da Blizzard; redistribuir é problema de direitos autorais). Decidido com o mantenedor em 2026-11-28, depois de considerar guardar o `.exe` no repositório.
+- Na instalação, o Snow procura o instalador **em `~/Downloads`** (o mais novo primeiro) e confere a assinatura de cada um.
+- **A última cópia que passou na verificação fica guardada** em `~/.cache/snow-launcher/installer/` e é o **padrão** nas próximas instalações (recriar a casinha, por exemplo), sem baixar de novo. Um download mais novo e válido a substitui.
 - A versão do instalador quase não importa: depois de instalado, o Battle.net se atualiza sozinho.
+- `snowctl house installer status` mostra a cópia guardada e o que há em Downloads, já verificados.
 
 **2 – Arquivo local**
-- Botão "Usar instalador que já baixei". Plano B se o download falhar ou a rede bloquear o endereço.
+- `--installer PATH` (na janela, "Usar um arquivo meu"), também verificado. Se o arquivo indicado falhar, o Snow **não** troca por outro: para e explica.
 
 **3 – Importar instalação existente (o mais importante para quem já joga)**
 
@@ -714,7 +716,7 @@ Além dos experimentos planejados abaixo, o `docs/experimentos.md` registra obse
 | Encerrar processo errado ou perder progresso de jogo | Identificação por `WINEPREFIX`, nunca encerrar jogo aberto, encerramento gradual |
 | Empacotar GTK4 em AppImage | Experimento E7 cedo, matriz de distros no CI |
 | Conflito de nome "Snow Launcher" | Pesquisar antes do primeiro release |
-| Blizzard muda o endereço do instalador | Endereço vem do repositório de quirks (atualizável) + opção de arquivo local |
+| Blizzard muda a página do instalador | O usuário baixa pelo navegador (a página é só um atalho); arquivo local e a cópia verificada guardada continuam funcionando |
 | Mantenedor único | Documentação, ADRs, quirks fáceis de contribuir |
 
 ## 15 – Instruções para o Claude Code
