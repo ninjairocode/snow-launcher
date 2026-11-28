@@ -100,6 +100,16 @@ snowctl import            # jogos que outros launchers têm
 snowctl doctor            # problemas conhecidos nos logs recentes do Battle.net
 ```
 
+## Gerar a AppImage
+
+```sh
+packaging/appimage/build.sh   # precisa do podman; compila num contêiner Ubuntu 24.04
+```
+
+O resultado, `target/appimage/Snow_Launcher-<versão>-x86_64.AppImage`, roda no
+Ubuntu 24.04 e em distribuições mais novas. Sem argumento abre a janela; com
+`snowctl …` ou `snowd`, roda os outros dois programas.
+
 ## Como funciona
 
 - O `snowd`, um daemon pequeno, vigia os processos da casinha, escuta a

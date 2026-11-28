@@ -550,14 +550,20 @@ async fn run_actions(bus: &zbus::Connection, mut requests: mpsc::UnboundedReceiv
     }
 }
 
-/// Opens or shows the window (GTK keeps a single instance). Prefers the
-/// `snow-launcher` next to `snowd`, then the one in `PATH`.
+/// Opens or shows the window (GTK keeps a single instance). From an
+/// AppImage, the AppImage file itself (its temporary mount goes away with
+/// `snowd`); otherwise the `snow-launcher` next to `snowd`, then the one
+/// in `PATH`.
 async fn open_launcher() -> Result<(), String> {
-    let beside = std::env::current_exe()
-        .ok()
-        .map(|exe| exe.with_file_name(LAUNCHER_BINARY))
-        .filter(|path| path.is_file());
-    let program = beside.unwrap_or_else(|| PathBuf::from(LAUNCHER_BINARY));
+    use snowlauncher_core::packaging::InstallKind;
+    let program = match snowlauncher_wine::user_service::install_kind() {
+        InstallKind::AppImage(image) => image,
+        InstallKind::SystemPackage | InstallKind::Development => std::env::current_exe()
+            .ok()
+            .map(|exe| exe.with_file_name(LAUNCHER_BINARY))
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| PathBuf::from(LAUNCHER_BINARY)),
+    };
     let mut child = tokio::process::Command::new(&program)
         .process_group(0)
         .spawn()

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Snow Launcher's AppImage entry point. The first argument picks the
+# program: `snowd` (the background service) or `snowctl` (the command
+# line); anything else opens the window.
+here="$(dirname "$(readlink -f "$0")")"
+case "$1" in
+    snowd | snowctl)
+        program="$1"
+        shift
+        exec "$here/usr/bin/$program" "$@"
+        ;;
+    *)
+        exec "$here/usr/bin/snow-launcher" "$@"
+        ;;
+esac
