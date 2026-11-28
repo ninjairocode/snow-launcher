@@ -19,7 +19,7 @@ use futures_util::StreamExt;
 use snowlauncher_core::desktop::{Notification, Notifier};
 use snowlauncher_core::house::BATTLENET_EXE;
 use snowlauncher_core::tray::{
-    MenuItem, MenuKind, TrayAction, TrayGame, action_for, find, status_line, tray_menu,
+    MenuItem, MenuKind, MenuState, TrayAction, TrayGame, action_for, find, status_line, tray_menu,
 };
 use snowlauncher_wine::game_icon::game_icon;
 use snowlauncher_wine::house::{
@@ -341,12 +341,7 @@ async fn serve(bus: &zbus::Connection, mut status: watch::Receiver<Status>) -> R
         .at(
             MENU_PATH,
             Menu {
-                items: tray_menu(
-                    &line,
-                    house.ready,
-                    !current.running_games.is_empty(),
-                    &house.games,
-                ),
+                items: tray_menu(menu_state(&line, &current, &house), &house.games),
                 revision: 1,
                 actions,
             },
@@ -362,6 +357,15 @@ async fn serve(bus: &zbus::Connection, mut status: watch::Receiver<Status>) -> R
         result = keep_registered(bus, &name) => result,
         result = follow(bus, status, house) => result,
         () = run_actions(bus, requests) => Ok(()),
+    }
+}
+
+fn menu_state<'a>(line: &'a str, status: &Status, house: &HouseGames) -> MenuState<'a> {
+    MenuState {
+        status: line,
+        house_ready: house.ready,
+        game_running: !status.running_games.is_empty(),
+        battlenet_running: status.battlenet_running,
     }
 }
 
@@ -443,12 +447,7 @@ async fn follow(
         }
         let current = status.borrow_and_update().clone();
         let line = line_for(&current);
-        let items = tray_menu(
-            &line,
-            house.ready,
-            !current.running_games.is_empty(),
-            &house.games,
-        );
+        let items = tray_menu(menu_state(&line, &current, &house), &house.games);
         {
             let mut menu_ref = menu.get_mut().await;
             if menu_ref.items != items {
@@ -602,7 +601,15 @@ mod tests {
             icon_png: Some(b"\x89PNG".to_vec()),
         }];
         let menu = Menu {
-            items: tray_menu("No game running", true, false, &games),
+            items: tray_menu(
+                MenuState {
+                    status: "No game running",
+                    house_ready: true,
+                    game_running: false,
+                    battlenet_running: true,
+                },
+                &games,
+            ),
             revision: 1,
             actions,
         };
