@@ -36,6 +36,8 @@ pub struct MenuItem {
     pub label: String,
     pub enabled: bool,
     pub kind: MenuKind,
+    /// PNG shown next to the label (a game's icon).
+    pub icon_png: Option<Vec<u8>>,
 }
 
 /// A library game, for the "Play" submenu.
@@ -44,6 +46,8 @@ pub struct TrayGame {
     pub name: String,
     /// `None` until Battle.net's log reveals it.
     pub launch_code: Option<String>,
+    /// The game's icon as PNG, read from its own executable.
+    pub icon_png: Option<Vec<u8>>,
 }
 
 const STATUS_ID: i32 = 1;
@@ -93,6 +97,7 @@ pub fn tray_menu(
         label: label.to_owned(),
         enabled,
         kind: MenuKind::Action(action),
+        icon_png: None,
     };
     let mut play: Vec<MenuItem> = games
         .iter()
@@ -102,7 +107,10 @@ pub fn tray_menu(
                 name: game.name.clone(),
                 code: code.clone(),
             });
-            item(id, &game.name, house_ready && action.is_some(), action)
+            MenuItem {
+                icon_png: game.icon_png.clone(),
+                ..item(id, &game.name, house_ready && action.is_some(), action)
+            }
         })
         .collect();
     if play.is_empty() {
@@ -115,6 +123,7 @@ pub fn tray_menu(
             label: String::new(),
             enabled: true,
             kind: MenuKind::Separator,
+            icon_png: None,
         },
         item(
             OPEN_LAUNCHER_ID,
@@ -133,12 +142,14 @@ pub fn tray_menu(
             label: "Play".to_owned(),
             enabled: house_ready,
             kind: MenuKind::Submenu(play),
+            icon_png: None,
         },
         MenuItem {
             id: QUIT_SEPARATOR_ID,
             label: String::new(),
             enabled: true,
             kind: MenuKind::Separator,
+            icon_png: None,
         },
         item(
             QUIT_ID,
@@ -183,6 +194,7 @@ mod tests {
         TrayGame {
             name: "World of Warcraft".to_owned(),
             launch_code: code.map(str::to_owned),
+            icon_png: Some(b"png".to_vec()),
         }
     }
 
@@ -220,6 +232,8 @@ mod tests {
             ]
         );
         assert_eq!(action_for(&menu, QUIT_ID), Some(&TrayAction::QuitBattlenet));
+        let game = find(&menu, FIRST_GAME_ID).unwrap();
+        assert_eq!(game.icon_png.as_deref(), Some(&b"png"[..]));
         assert_eq!(action_for(&menu, STATUS_ID), None);
         assert_eq!(
             action_for(&menu, OPEN_LAUNCHER_ID),

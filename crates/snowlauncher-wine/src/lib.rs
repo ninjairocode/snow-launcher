@@ -4,6 +4,7 @@ pub mod battlenet_logs;
 pub mod config_file;
 pub mod daemon_client;
 pub mod desktop;
+pub mod game_icon;
 pub mod house;
 pub mod instance;
 pub mod library;

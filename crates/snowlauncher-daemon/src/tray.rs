@@ -21,6 +21,7 @@ use snowlauncher_core::house::BATTLENET_EXE;
 use snowlauncher_core::tray::{
     MenuItem, MenuKind, TrayAction, TrayGame, action_for, find, status_line, tray_menu,
 };
+use snowlauncher_wine::game_icon::game_icon;
 use snowlauncher_wine::house::{
     QUIT_TIMEOUT, QuitOutcome, load_record, open_house, play_game, quit_battlenet, record_path,
     run_battlenet, write_atomic,
@@ -187,6 +188,9 @@ fn properties(item: &MenuItem) -> HashMap<String, OwnedValue> {
     }
     if !item.enabled {
         pairs.push(("enabled", Value::from(false)));
+    }
+    if let Some(png) = &item.icon_png {
+        pairs.push(("icon-data", Value::from(png.as_slice())));
     }
     props(pairs)
 }
@@ -470,6 +474,10 @@ async fn read_house_games() -> HouseGames {
         let games = installed_games(&record.library, &known_product_codes(&record.prefix))
             .into_iter()
             .map(|game| TrayGame {
+                // dbusmenu's icon-data is PNG; other icons are left out.
+                icon_png: game_icon(&game)
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "png"))
+                    .and_then(|path| std::fs::read(path).ok()),
                 name: game.name,
                 launch_code: game.launch_code,
             })
@@ -591,6 +599,7 @@ mod tests {
         let games = [TrayGame {
             name: "World of Warcraft".to_owned(),
             launch_code: Some("WoWF".to_owned()),
+            icon_png: Some(b"\x89PNG".to_vec()),
         }];
         let menu = Menu {
             items: tray_menu("No game running", true, false, &games),
@@ -637,6 +646,20 @@ mod tests {
         let (_, play_props, games) = menu.layout_of(play.id).unwrap();
         assert!(play_props.contains_key("children-display"));
         assert_eq!(games.len(), 1);
+    }
+
+    #[test]
+    fn game_items_carry_their_icon() {
+        let (menu, _) = menu();
+        let play = menu.items.iter().find(|item| item.label == "Play").unwrap();
+        let MenuKind::Submenu(games) = &play.kind else {
+            panic!("Play is a submenu");
+        };
+        let icon = properties(&games[0])
+            .get("icon-data")
+            .and_then(|value| Vec::<u8>::try_from(value.clone()).ok());
+        assert_eq!(icon.as_deref(), Some(&b"\x89PNG"[..]));
+        assert!(!properties(&menu.items[0]).contains_key("icon-data"));
     }
 
     #[test]
