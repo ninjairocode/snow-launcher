@@ -341,6 +341,71 @@ fn run_and_report(
     Ok(())
 }
 
+/// What `snowctl house battlenet-icon` does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum IconAction {
+    /// Hide it (the house's programs put no icon in the tray).
+    Hide,
+    /// Show it again (back to the default).
+    Show,
+    /// Say whether it is hidden.
+    Status,
+}
+
+/// `snowctl house battlenet-icon`: hides Battle.net's blurry tray icon
+/// with a Windows policy that Wine honours (E14), or shows it again.
+pub fn battlenet_icon(action: IconAction, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    use snowlauncher_core::house::tray_policy_args;
+    let (_, runner) = house_runner()?;
+    let hidden = executor::battlenet_icon_hidden(&runner)?;
+    let hide = match action {
+        IconAction::Status => {
+            let state = if hidden { "hidden" } else { "shown" };
+            writeln!(out, "Battle.net's tray icon: {state}")?;
+            return Ok(());
+        }
+        IconAction::Hide => true,
+        IconAction::Show => false,
+    };
+    if hidden == hide {
+        let state = if hidden { "hidden" } else { "shown" };
+        writeln!(out, "Battle.net's tray icon is already {state}.")?;
+        return Ok(());
+    }
+    let what = if hide { "Hide" } else { "Show" };
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "{what} Battle.net's tray icon{mode}")?;
+    if dry_run {
+        writeln!(out, "  back up the policy key (reg export)")?;
+        writeln!(out, "  {}", tray_policy_args(hide).join(" "))?;
+        writeln!(out, "  check it (reg query)")?;
+        return Ok(());
+    }
+    let backups = record_path()
+        .and_then(|path| path.parent().map(|dir| dir.join("backups")))
+        .context("could not determine the state directory")?;
+    let change = executor::set_battlenet_icon(&runner, hide, &backups)?;
+    match &change.backup {
+        Some(path) => writeln!(out, "Backup of the policy key: {}", path.display())?,
+        None => writeln!(out, "No backup needed: the policy key did not exist yet.")?,
+    }
+    writeln!(
+        out,
+        "Done. It takes effect the next time Battle.net starts with the house closed."
+    )?;
+    if hide {
+        writeln!(
+            out,
+            "To bring Battle.net's window back, use Snow's tray menu or `snowctl house open`."
+        )?;
+    }
+    Ok(())
+}
+
 /// `snowctl house quit`: closes Battle.net the clean way (E10), never
 /// while a game runs in the house.
 pub fn quit(dry_run: bool, out: &mut impl io::Write) -> Result<()> {

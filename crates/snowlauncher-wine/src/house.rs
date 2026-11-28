@@ -188,6 +188,74 @@ pub fn run_battlenet(runner: &UmuRunner, args: &[&str]) -> Result<BattlenetRun, 
     }
 }
 
+/// Whether the house hides tray icons, asked to Wine itself (`reg
+/// query`). Not read from `user.reg`: while the house runs, Wine saves a
+/// change there only later, so the file can still show the old value.
+pub fn battlenet_icon_hidden(runner: &UmuRunner) -> Result<bool, HouseError> {
+    use snowlauncher_core::house::{TRAY_POLICY_KEY, TRAY_POLICY_VALUE};
+    runner
+        .run_alongside(&["reg", "query", TRAY_POLICY_KEY, "/v", TRAY_POLICY_VALUE])
+        .map_err(|error| HouseError::Step {
+            step: "check the tray policy".to_owned(),
+            problem: error.to_string(),
+        })
+}
+
+/// What [`set_battlenet_icon`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconChange {
+    /// The policy key as it was, exported before the change (`None` when
+    /// the key did not exist yet).
+    pub backup: Option<PathBuf>,
+}
+
+/// Hides (`hide`) or shows again the house's tray icons (E14), the
+/// Battle.net one among them. Backs up the policy key first, changes it
+/// with Wine's `reg`, then checks it with `reg query`. Takes effect the
+/// next time the house starts from closed.
+pub fn set_battlenet_icon(
+    runner: &UmuRunner,
+    hide: bool,
+    backup_dir: &Path,
+) -> Result<IconChange, HouseError> {
+    use snowlauncher_core::house::{TRAY_POLICY_KEY, tray_policy_args};
+    let step = |step: &str, problem: String| HouseError::Step {
+        step: step.to_owned(),
+        problem,
+    };
+    fs::create_dir_all(backup_dir).map_err(io_err("create", backup_dir))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let backup = backup_dir.join(format!("tray-policy-{stamp}.reg"));
+    let target = windows_path(&backup)
+        .ok_or_else(|| step("back up the tray policy", "path is not UTF-8".to_owned()))?;
+    // Fails when the key does not exist yet: nothing to back up then.
+    let exported = runner
+        .run_alongside(&["reg", "export", TRAY_POLICY_KEY, target.as_str(), "/y"])
+        .map_err(|error| step("back up the tray policy", error.to_string()))?;
+    let backup = (exported && backup.is_file()).then_some(backup);
+
+    let changed = runner
+        .run_alongside(&tray_policy_args(hide))
+        .map_err(|error| step("change the tray policy", error.to_string()))?;
+    // `reg delete` of a value that is not there fails; that is fine.
+    if !changed && hide {
+        return Err(step("change the tray policy", "reg add failed".to_owned()));
+    }
+    let present = battlenet_icon_hidden(runner)?;
+    if present != hide {
+        return Err(step(
+            "check the tray policy",
+            format!(
+                "the value is {}",
+                if present { "still there" } else { "missing" }
+            ),
+        ));
+    }
+    Ok(IconChange { backup })
+}
+
 /// What [`quit_battlenet`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuitOutcome {
