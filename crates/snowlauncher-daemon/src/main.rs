@@ -152,6 +152,17 @@ async fn main() -> Result<()> {
 
     let mut sigterm = signal(SignalKind::terminate()).context("failed to listen for SIGTERM")?;
 
+    // Snow's menu entry and icon (AppImage, development build): written
+    // when missing or when the AppImage moved.
+    let kind = snowlauncher_wine::user_service::install_kind();
+    match snowlauncher_wine::desktop_entry::ensure_desktop_entry(&kind) {
+        Ok(snowlauncher_wine::desktop_entry::EntryUpdate::Written) => {
+            info!("menu entry and icon written");
+        }
+        Ok(_) => {}
+        Err(error) => warn!(%error, "could not write the menu entry"),
+    }
+
     // Off the main loop: opening Battle.net must not delay the watching.
     tokio::spawn(autostart::run(config.startup.open_battlenet));
 

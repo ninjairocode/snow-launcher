@@ -639,7 +639,7 @@ Pendente:
   | Atualizações | o Snow oferece | o gerenciador de pacotes | quem desenvolve recompila |
 
   Já usado pelo `snowctl service install`, cujo `--dry-run` mostra o comando que o serviço vai rodar.
-- Arquivos `.desktop` e `metainfo.xml` com o ícone `io.github.ninjairocode.SnowLauncher.svg`.
+- Arquivos `.desktop` e `metainfo.xml` com o ícone `io.github.ninjairocode.SnowLauncher.svg`: **feitos**, em `data/` (validados com `desktop-file-validate` e `appstreamcli`). O nome do `.desktop` é o app id da janela, para o GNOME ligar a janela ao atalho. Na AppImage e na instalação de desenvolvimento, o `snowd` (a cada início) e a janela instalam o atalho, com o `Exec` absoluto, e o ícone em `~/.local/share`, só quando algo mudou (por exemplo, a AppImage foi movida). Num pacote do sistema, quem instala é o pacote.
 
 ### Depois
 

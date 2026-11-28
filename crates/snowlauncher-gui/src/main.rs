@@ -464,6 +464,10 @@ impl Component for App {
         let widgets = view_output!();
         add_app_actions(&sender);
         install_app_icon(&root);
+        let kind = user_service::install_kind();
+        if let Err(error) = snowlauncher_wine::desktop_entry::ensure_desktop_entry(&kind) {
+            eprintln!("snow-launcher: could not write the menu entry: {error}");
+        }
 
         // With "Start Snow at login" off, or after "Quit Snow Launcher",
         // opening the window is what starts Snow again.
