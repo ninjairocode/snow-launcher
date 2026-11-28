@@ -106,6 +106,39 @@ pub struct HouseConfig {
     pub runtime: Option<PathBuf>,
 }
 
+/// Why a config edit failed.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigEditError {
+    #[error("config.toml is not valid TOML, so it was left as is: {0}")]
+    Parse(String),
+    #[error("`{0}` in config.toml is not a table")]
+    NotATable(String),
+}
+
+/// Sets `[section] key = value` in the text of a config file and returns
+/// the new text. Everything else stays as the user wrote it: comments,
+/// order, spacing and keys this build does not know. Pure.
+pub fn set_bool(
+    text: &str,
+    section: &str,
+    key: &str,
+    value: bool,
+) -> Result<String, ConfigEditError> {
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|error: toml_edit::TomlError| ConfigEditError::Parse(error.to_string()))?;
+    if doc.get("schema").is_none() {
+        doc["schema"] = toml_edit::value(i64::from(CURRENT_SCHEMA));
+    }
+    let table = doc
+        .entry(section)
+        .or_insert_with(toml_edit::table)
+        .as_table_mut()
+        .ok_or_else(|| ConfigEditError::NotATable(section.to_owned()))?;
+    table[key] = toml_edit::value(value);
+    Ok(doc.to_string())
+}
+
 /// Replaces a leading `~` component with `home`: `~/Games` becomes
 /// `<home>/Games`. Other paths, including `~user/...`, are returned as is.
 pub fn expand_home(path: &Path, home: &Path) -> PathBuf {
@@ -259,5 +292,44 @@ mod tests {
     #[test]
     fn invalid_ui_scale_is_an_error() {
         assert!(parse("[display]\nui_scale = \"huge\"\n").is_err());
+    }
+
+    #[test]
+    fn editing_keeps_what_the_user_wrote() {
+        let text = "schema = 1\n# my prefix\nprefix = \"~/x\"\n\n[sleep]\nallow_suspend_while_playing = true # yes\nfuture_key = 3\n";
+        let edited = set_bool(text, "performance", "mangohud", true).unwrap();
+        assert!(edited.starts_with(text), "{edited}");
+        assert!(
+            edited.ends_with("[performance]\nmangohud = true\n"),
+            "{edited}"
+        );
+        let loaded = parse(&edited).unwrap();
+        assert!(loaded.config.performance.mangohud);
+        assert!(loaded.config.sleep.allow_suspend_while_playing);
+
+        // Changing it again touches only that value.
+        let again = set_bool(&edited, "performance", "mangohud", false).unwrap();
+        assert_eq!(again, edited.replace("mangohud = true", "mangohud = false"));
+    }
+
+    #[test]
+    fn editing_an_empty_file_starts_a_valid_config() {
+        let edited = set_bool("", "performance", "gamemode", true).unwrap();
+        let loaded = parse(&edited).unwrap();
+        assert_eq!(loaded.config.schema, CURRENT_SCHEMA);
+        assert!(loaded.config.performance.gamemode);
+        assert!(loaded.warnings.is_empty());
+    }
+
+    #[test]
+    fn a_broken_file_is_not_touched() {
+        assert!(matches!(
+            set_bool("[performance\n", "performance", "gamemode", true),
+            Err(ConfigEditError::Parse(_))
+        ));
+        assert!(matches!(
+            set_bool("performance = 3\n", "performance", "gamemode", true),
+            Err(ConfigEditError::NotATable(_))
+        ));
     }
 }

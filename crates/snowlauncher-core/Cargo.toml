@@ -12,6 +12,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_ignored = "0.1.14"
 thiserror = "2"
 toml = "1.2.3"
+toml_edit = "0.25"
 
 [lints]
 workspace = true

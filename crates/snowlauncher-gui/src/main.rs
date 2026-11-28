@@ -9,6 +9,7 @@
 
 mod games;
 mod images;
+mod preferences;
 mod state;
 
 use std::time::{Duration, Instant};
@@ -122,6 +123,7 @@ enum Msg {
     Play(GameCard),
     /// The window's scale factor changed (e.g. moved to another monitor).
     Scale(i32),
+    Preferences,
 }
 
 #[derive(Debug)]
@@ -157,6 +159,11 @@ impl Component for App {
                         #[watch]
                         set_sensitive: model.can_act(),
                         connect_clicked => Msg::OpenBattlenet,
+                    },
+                    pack_end = &gtk::Button {
+                        set_icon_name: "preferences-system-symbolic",
+                        set_tooltip_text: Some("Preferences"),
+                        connect_clicked => Msg::Preferences,
                     },
                 },
 
@@ -354,8 +361,9 @@ impl Component for App {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, message: Msg, sender: ComponentSender<Self>, _: &Self::Root) {
+    fn update(&mut self, message: Msg, sender: ComponentSender<Self>, root: &Self::Root) {
         match message {
+            Msg::Preferences => preferences::dialog().present(Some(root)),
             Msg::OpenBattlenet => self.act(Job::OpenBattlenet, &sender),
             Msg::Scale(scale) => {
                 if scale != self.art.scale {

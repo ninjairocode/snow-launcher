@@ -6,6 +6,8 @@
 //! and Battle.net never gets game mode.
 
 use std::future::Future;
+use std::path::PathBuf;
+use std::time::SystemTime;
 
 use snowlauncher_core::process::Pid;
 use tracing::{debug, info, warn};
@@ -18,6 +20,42 @@ pub trait GameModeClient {
     fn unregister(&mut self, pid: Pid) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+/// Follows `[performance] gamemode` in `config.toml`, so the switch in
+/// the window works without restarting `snowd`: the file is only read
+/// again when its modification time changes.
+pub struct ConfigReload {
+    path: PathBuf,
+    seen: Option<SystemTime>,
+}
+
+impl ConfigReload {
+    pub fn new(path: PathBuf) -> Self {
+        let seen = modified(&path);
+        Self { path, seen }
+    }
+
+    /// The new setting, if the file changed since the last look.
+    fn changed(&mut self) -> Option<bool> {
+        let now = modified(&self.path);
+        if now == self.seen {
+            return None;
+        }
+        self.seen = now;
+        // A missing or broken file means the default (off), like at start.
+        let enabled = snowlauncher_wine::config_file::read_config(&self.path)
+            .ok()
+            .flatten()
+            .is_some_and(|loaded| loaded.config.performance.gamemode);
+        Some(enabled)
+    }
+}
+
+fn modified(path: &std::path::Path) -> Option<SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+}
+
 /// Keeps GameMode's registrations in step with the running games.
 pub struct GameModeSession<C> {
     client: C,
@@ -25,6 +63,7 @@ pub struct GameModeSession<C> {
     registered: Vec<Pid>,
     /// Warn once, not every poll, while GameMode is unavailable.
     warned: bool,
+    reload: Option<ConfigReload>,
 }
 
 impl<C: GameModeClient> GameModeSession<C> {
@@ -34,11 +73,37 @@ impl<C: GameModeClient> GameModeSession<C> {
             enabled,
             registered: Vec::new(),
             warned: false,
+            reload: None,
+        }
+    }
+
+    /// Also follow changes to the setting in this config file.
+    pub fn following(mut self, reload: ConfigReload) -> Self {
+        self.reload = Some(reload);
+        self
+    }
+
+    /// Turns GameMode use on or off; off lets go of every game at once.
+    pub async fn set_enabled(&mut self, enabled: bool) {
+        if enabled == self.enabled {
+            return;
+        }
+        info!(enabled, "GameMode setting changed");
+        self.enabled = enabled;
+        if !enabled {
+            for pid in std::mem::take(&mut self.registered) {
+                if let Err(error) = self.client.unregister(pid).await {
+                    debug!(pid = pid.0, %error, "GameMode: already unregistered");
+                }
+            }
         }
     }
 
     /// Registers new game processes and unregisters the ones that ended.
     pub async fn update(&mut self, games: &[Pid]) {
+        if let Some(enabled) = self.reload.as_mut().and_then(ConfigReload::changed) {
+            self.set_enabled(enabled).await;
+        }
         if !self.enabled {
             return;
         }
@@ -177,6 +242,34 @@ mod tests {
                 "unregister 11"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn turning_it_off_lets_go_of_the_games() {
+        let mut session = GameModeSession::new(FakeGameMode::default(), true);
+        session.update(&[Pid(10)]).await;
+        session.set_enabled(false).await;
+        session.update(&[Pid(10)]).await; // off: not registered again
+        session.set_enabled(true).await;
+        session.update(&[Pid(10)]).await;
+        assert_eq!(
+            session.client.calls,
+            ["register 10", "unregister 10", "register 10"]
+        );
+    }
+
+    #[tokio::test]
+    async fn follows_the_config_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        let mut session = GameModeSession::new(FakeGameMode::default(), false)
+            .following(ConfigReload::new(path.clone()));
+        session.update(&[Pid(10)]).await;
+        assert!(session.client.calls.is_empty());
+
+        std::fs::write(&path, "[performance]\ngamemode = true\n").unwrap();
+        session.update(&[Pid(10)]).await;
+        assert_eq!(session.client.calls, ["register 10"]);
     }
 
     #[tokio::test]

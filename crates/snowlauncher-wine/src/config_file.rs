@@ -1,4 +1,5 @@
-//! Reading `config.toml` from disk and choosing which prefix to use.
+//! Reading `config.toml` from disk, changing one setting in it, and
+//! choosing which prefix to use.
 //!
 //! Shared by `snowd` and `snowctl`, so both pick the same prefix.
 
@@ -11,6 +12,57 @@ use directories::BaseDirs;
 use snowlauncher_core::config::{self, Config, ConfigError, LoadedConfig, expand_home};
 
 use crate::prefix::default_prefix_path;
+
+/// Why changing a setting failed.
+#[derive(Debug, thiserror::Error)]
+pub enum UpdateConfigError {
+    #[error("could not {what} {}", path.display())]
+    Io {
+        what: &'static str,
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error(transparent)]
+    Edit(#[from] config::ConfigEditError),
+}
+
+/// Sets `[section] key = value` (a switch) in `config.toml` at `path`,
+/// keeping the rest of the file as it is. The current file, if any, is
+/// copied to `backup_dir` first; the new one is written atomically.
+/// Returns the backup.
+pub fn set_config_bool(
+    path: &Path,
+    section: &str,
+    key: &str,
+    value: bool,
+    backup_dir: &Path,
+) -> Result<Option<PathBuf>, UpdateConfigError> {
+    let io = |what, path: &Path| {
+        let path = path.to_owned();
+        move |source| UpdateConfigError::Io { what, path, source }
+    };
+    let current = match fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(io("read", path)(error)),
+    };
+    let edited = config::set_bool(current.as_deref().unwrap_or(""), section, key, value)?;
+    let backup = match &current {
+        Some(text) => {
+            fs::create_dir_all(backup_dir).map_err(io("create", backup_dir))?;
+            let backup = crate::house::unique_backup_path(backup_dir, "config", ".toml");
+            crate::house::write_atomic(&backup, text.as_bytes()).map_err(io("write", &backup))?;
+            Some(backup)
+        }
+        None => None,
+    };
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(io("create", dir))?;
+    }
+    crate::house::write_atomic(path, edited.as_bytes()).map_err(io("write", path))?;
+    Ok(backup)
+}
 
 /// `$XDG_CONFIG_HOME/snow-launcher/config.toml`.
 pub fn default_config_path() -> Option<PathBuf> {
@@ -206,5 +258,33 @@ mod tests {
             read_config(&path),
             Err(ConfigFileError::Invalid { .. })
         ));
+    }
+
+    #[test]
+    fn setting_a_switch_backs_up_and_keeps_the_rest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config/snow-launcher/config.toml");
+        let backups = tmp.path().join("backups");
+
+        // No file yet: created, nothing to back up.
+        assert_eq!(
+            set_config_bool(&path, "performance", "gamemode", true, &backups).unwrap(),
+            None
+        );
+        let loaded = read_config(&path).unwrap().unwrap();
+        assert!(loaded.config.performance.gamemode);
+
+        let before = fs::read_to_string(&path).unwrap();
+        let backup = set_config_bool(&path, "performance", "mangohud", true, &backups)
+            .unwrap()
+            .unwrap();
+        assert_eq!(fs::read_to_string(backup).unwrap(), before);
+        let loaded = read_config(&path).unwrap().unwrap();
+        assert!(loaded.config.performance.mangohud && loaded.config.performance.gamemode);
+
+        // A broken file is left alone.
+        fs::write(&path, "[performance\n").unwrap();
+        assert!(set_config_bool(&path, "performance", "mangohud", false, &backups).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "[performance\n");
     }
 }
