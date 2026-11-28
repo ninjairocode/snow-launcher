@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright the Snow Launcher contributors -->
+<component type="desktop-application">
+  <id>io.github.ninjairocode.SnowLauncher</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Snow Launcher</name>
+  <summary>Keeps the official Battle.net app well configured on Linux</summary>
+  <summary xml:lang="pt-BR">Mantém o Battle.net oficial bem configurado no Linux</summary>
+
+  <developer id="io.github.ninjairocode">
+    <name>ninjairocode</name>
+  </developer>
+
+  <description>
+    <p>
+      A companion for running the official Battle.net app under Wine or Proton.
+      It sets up a dedicated environment for it, installs Battle.net with a
+      verified installer, imports games from other launchers, and watches over
+      your play: no automatic suspend while a game runs, and a warning when a
+      game's connection dies.
+    </p>
+    <p>
+      Snow Launcher never talks to Blizzard's servers, never touches your
+      credentials and never changes games. It is an independent project, not
+      affiliated with Blizzard Entertainment.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.ninjairocode.SnowLauncher.desktop</launchable>
+  <provides>
+    <binary>snow-launcher</binary>
+    <binary>snowctl</binary>
+    <binary>snowd</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/ninjairocode/snow-launcher</url>
+  <url type="bugtracker">https://github.com/ninjairocode/snow-launcher/issues</url>
+  <url type="vcs-browser">https://github.com/ninjairocode/snow-launcher</url>
+
+  <categories>
+    <category>Game</category>
+  </categories>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-11-28">
+      <description>
+        <p>First test release: the Battle.net house, a GNOME window and a tray icon.</p>
+      </description>
+    </release>
+  </releases>
+</component>

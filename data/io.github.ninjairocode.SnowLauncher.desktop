@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Snow Launcher
+GenericName=Battle.net Companion
+GenericName[pt_BR]=Companheiro do Battle.net
+Comment=Keeps the official Battle.net app well configured and watched over
+Comment[pt_BR]=Mantém o Battle.net oficial bem configurado e vigiado
+Exec=snow-launcher
+Icon=io.github.ninjairocode.SnowLauncher
+Terminal=false
+Categories=Game;
+Keywords=Battle.net;Wine;Proton;Launcher;
+StartupNotify=true
+SingleMainWindow=true

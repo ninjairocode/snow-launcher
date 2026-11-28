@@ -60,6 +60,45 @@ impl InstallKind {
     }
 }
 
+/// The menu entry and the icon, as shipped in `data/` (the entry has
+/// `Exec=snow-launcher`, right for a package).
+pub const APP_ID: &str = "io.github.ninjairocode.SnowLauncher";
+
+/// The menu entry with `Exec` set to `program` (an absolute path: the
+/// `snow-launcher` of a development build, or the `.AppImage` file),
+/// quoted as the Desktop Entry specification asks.
+pub fn desktop_entry_for(template: &str, program: &Path) -> String {
+    let exec = format!("Exec={}", desktop_exec_quote(&program.to_string_lossy()));
+    let mut out = String::with_capacity(template.len() + 64);
+    for line in template.lines() {
+        if line.starts_with("Exec=") {
+            out.push_str(&exec);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// One `Exec` argument: in double quotes, with `"`, `` ` ``, `$` and `\`
+/// escaped by a backslash, and `%` doubled (it starts a field code).
+fn desktop_exec_quote(argument: &str) -> String {
+    let mut quoted = String::from('"');
+    for c in argument.chars() {
+        match c {
+            '"' | '`' | '$' | '\\' => {
+                quoted.push('\\');
+                quoted.push(c);
+            }
+            '%' => quoted.push_str("%%"),
+            _ => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +152,27 @@ mod tests {
         assert!(!InstallKind::SystemPackage.writes_desktop_entry());
         assert!(!InstallKind::Development.offers_updates());
         assert!(InstallKind::Development.writes_desktop_entry());
+    }
+
+    const TEMPLATE: &str = "[Desktop Entry]\nName=Snow Launcher\nExec=snow-launcher\nIcon=io.github.ninjairocode.SnowLauncher\n";
+
+    #[test]
+    fn the_entry_runs_the_absolute_program() {
+        let entry = desktop_entry_for(TEMPLATE, Path::new(IMAGE));
+        assert!(entry.contains(&format!("\nExec=\"{IMAGE}\"\n")), "{entry}");
+        assert!(entry.contains("Icon=io.github.ninjairocode.SnowLauncher\n"));
+        assert_eq!(entry.matches("Exec=").count(), 1);
+    }
+
+    #[test]
+    fn hard_paths_are_quoted_by_the_spec() {
+        let entry = desktop_entry_for(
+            TEMPLATE,
+            Path::new("/home/u/My \"Apps\"/100% $x/Snow.AppImage"),
+        );
+        assert!(
+            entry.contains(r#"Exec="/home/u/My \"Apps\"/100%% \$x/Snow.AppImage""#),
+            "{entry}"
+        );
     }
 }
