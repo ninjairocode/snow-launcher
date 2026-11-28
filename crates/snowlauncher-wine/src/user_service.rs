@@ -8,6 +8,14 @@ use std::process::{Command, Stdio};
 
 use directories::BaseDirs;
 
+/// How this copy of Snow was installed (see `snowlauncher_core::packaging`),
+/// from `$APPIMAGE` and the running executable.
+pub fn install_kind() -> snowlauncher_core::packaging::InstallKind {
+    let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
+    let exe = std::env::current_exe().unwrap_or_default();
+    snowlauncher_core::packaging::detect(appimage.as_deref(), &exe)
+}
+
 /// The unit `snowctl service install` writes.
 pub const UNIT_NAME: &str = "snowd.service";
 

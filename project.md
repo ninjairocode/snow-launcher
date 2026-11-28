@@ -630,6 +630,15 @@ Pendente:
   - **compilar o AppImage oficial no Ubuntu 24.04** (o CI usa `ubuntu-24.04`): um binário da GUI compilado no Fedora já exige glibc 2.39, sem nenhuma margem.
 - **Atualização**: publicar `.zsync` e informações de update embutidas (compatível com AppImageUpdate/Gear Lever).
 - **Integração com systemd + AppImage**: a unidade do serviço precisa apontar para o caminho do AppImage, que pode mudar. A cada execução, o app confere `$APPIMAGE` e **atualiza a unidade se o caminho mudou**.
+- **Como foi instalado** (`snowlauncher_core::packaging::InstallKind`, decidido pelo `$APPIMAGE` e pelo caminho do executável):
+
+  | | AppImage | Pacote do sistema (RPM…) | Desenvolvimento (`cargo install`) |
+  |---|---|---|---|
+  | O serviço `snowd` roda | o arquivo `.AppImage` com `snowd` (**nunca** a montagem temporária `/tmp/.mount_…`) | o `snowd` do pacote | o `snowd` ao lado do `snowctl` |
+  | Atalho e ícone | o Snow escreve | o pacote instala | o Snow escreve |
+  | Atualizações | o Snow oferece | o gerenciador de pacotes | quem desenvolve recompila |
+
+  Já usado pelo `snowctl service install`, cujo `--dry-run` mostra o comando que o serviço vai rodar.
 - Arquivos `.desktop` e `metainfo.xml` com o ícone `io.github.ninjairocode.SnowLauncher.svg`.
 
 ### Depois
