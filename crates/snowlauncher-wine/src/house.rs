@@ -289,6 +289,73 @@ pub fn unique_backup_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
     path
 }
 
+/// Prefix backups in `dir` (`prefix-*` folders), newest first.
+pub fn prefix_backups(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("prefix-"))
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| {
+            let time = entry.metadata().and_then(|meta| meta.modified()).ok()?;
+            Some((time, entry.path()))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    found.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Whether `dir` looks like a Wine prefix: a real folder (not a link)
+/// with `drive_c` and `system.reg`.
+fn looks_like_prefix(dir: &Path) -> bool {
+    fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir())
+        && dir.join("drive_c").is_dir()
+        && dir.join("system.reg").is_file()
+}
+
+/// Puts a copy of `backup` in place of the house's prefix. Refuses while
+/// the house is in use. The current prefix is never deleted: it is moved
+/// aside (an instant rename) into `aside_dir`, and that path is returned,
+/// so a restore can be undone too. `backup` itself is left as it was.
+pub fn restore_prefix(
+    prefix: &Path,
+    backup: &Path,
+    aside_dir: &Path,
+) -> Result<PathBuf, HouseError> {
+    let refuse = |problem: String| HouseError::Step {
+        step: "restore the prefix".to_owned(),
+        problem,
+    };
+    if !looks_like_prefix(backup) {
+        return Err(refuse(format!(
+            "{} is not a Wine prefix backup",
+            backup.display()
+        )));
+    }
+    let same = fs::canonicalize(backup).ok() == fs::canonicalize(prefix).ok();
+    if same {
+        return Err(refuse("the backup is the prefix itself".to_owned()));
+    }
+    let running = house_in_use(prefix)?;
+    if !running.is_empty() {
+        return Err(refuse(format!(
+            "the house is in use ({}); close Battle.net and wait for it to stop",
+            running.join(", ")
+        )));
+    }
+    fs::create_dir_all(aside_dir).map_err(io_err("create", aside_dir))?;
+    let aside = unique_backup_path(aside_dir, "prefix-replaced", "");
+    fs::rename(prefix, &aside).map_err(io_err("move aside", prefix))?;
+    if let Err(error) = backup_prefix(backup, prefix) {
+        // Put the original back; `backup_prefix` left no half copy.
+        fs::rename(&aside, prefix).map_err(io_err("put back", prefix))?;
+        return Err(error);
+    }
+    Ok(aside)
+}
+
 /// The backups [`set_runtime`] made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSwitch {
@@ -1066,6 +1133,56 @@ mod tests {
         };
         let error = run_battlenet(&runner, &[]).unwrap_err().to_string();
         assert!(error.contains("not installed"), "{error}");
+    }
+
+    fn fake_prefix(dir: &Path, marker: &str) {
+        fs::create_dir_all(dir.join("drive_c")).unwrap();
+        fs::write(dir.join("system.reg"), "WINE REGISTRY").unwrap();
+        fs::write(dir.join("drive_c/marker.txt"), marker).unwrap();
+    }
+
+    #[test]
+    fn restoring_a_prefix_keeps_the_current_one_aside() {
+        let tmp = tempfile::tempdir().unwrap();
+        let prefix = tmp.path().join("prefixes/battlenet");
+        let backups = tmp.path().join("backups");
+        fake_prefix(&prefix, "now");
+        let backup = backups.join("prefix-1");
+        fake_prefix(&backup, "before");
+
+        assert_eq!(prefix_backups(&backups), std::slice::from_ref(&backup));
+        let aside = restore_prefix(&prefix, &backup, &backups).unwrap();
+
+        let marker = |dir: &Path| fs::read_to_string(dir.join("drive_c/marker.txt")).unwrap();
+        assert_eq!(marker(&prefix), "before");
+        assert_eq!(marker(&aside), "now"); // moved aside, not deleted
+        assert_eq!(marker(&backup), "before"); // the backup is untouched
+        assert!(
+            aside
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("prefix-replaced-")
+        );
+    }
+
+    #[test]
+    fn restoring_refuses_what_is_not_a_prefix_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let prefix = tmp.path().join("prefix");
+        fake_prefix(&prefix, "now");
+        let not_prefix = tmp.path().join("prefix-x");
+        fs::create_dir_all(&not_prefix).unwrap();
+        let error = restore_prefix(&prefix, &not_prefix, tmp.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not a Wine prefix backup"), "{error}");
+        let error = restore_prefix(&prefix, &prefix, tmp.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("itself"), "{error}");
+        // Nothing moved.
+        assert!(prefix.join("drive_c/marker.txt").is_file());
     }
 
     #[test]

@@ -422,12 +422,7 @@ pub fn runtime_set(name: &str, dry_run: bool, out: &mut impl io::Write) -> Resul
         );
     }
     // Next to `prefixes/`, on the prefix's disk, so the copy can reflink.
-    let prefix_backups = record
-        .prefix
-        .parent()
-        .and_then(Path::parent)
-        .map(|data| data.join("backups"))
-        .context("the house's prefix has no parent folder")?;
+    let prefix_backups = prefix_backup_dir(&record.prefix)?;
     if dry_run {
         writeln!(out, "  back up {}", record_file.display())?;
         writeln!(
@@ -461,6 +456,95 @@ pub fn runtime_set(name: &str, dry_run: bool, out: &mut impl io::Write) -> Resul
     writeln!(
         out,
         "To go back: snowctl house runtime set \"{}\"",
+        record.runtime_name
+    )?;
+    Ok(())
+}
+
+/// Where prefix backups live: next to `prefixes/`, on the prefix's disk.
+fn prefix_backup_dir(prefix: &Path) -> Result<PathBuf> {
+    prefix
+        .parent()
+        .and_then(Path::parent)
+        .map(|data| data.join("backups"))
+        .context("the house's prefix has no parent folder")
+}
+
+/// `snowctl house restore-prefix`: lists the prefix backups, or puts one
+/// back in place of the house's prefix, keeping the current one aside.
+pub fn restore_prefix(
+    backup: Option<&Path>,
+    dry_run: bool,
+    out: &mut impl io::Write,
+) -> Result<()> {
+    let record_file = record_path().context("could not determine the state directory")?;
+    let record = load_record(&record_file)?
+        .context("there is no house yet; create it first with `snowctl house create`")?;
+    let dir = prefix_backup_dir(&record.prefix)?;
+    let Some(backup) = backup else {
+        let backups = executor::prefix_backups(&dir);
+        if backups.is_empty() {
+            writeln!(out, "No prefix backups in {}.", dir.display())?;
+            return Ok(());
+        }
+        writeln!(out, "Prefix backups, newest first ({}):", dir.display())?;
+        for path in &backups {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            writeln!(out, "  {name}")?;
+        }
+        writeln!(out, "Restore one with: snowctl house restore-prefix <name>")?;
+        return Ok(());
+    };
+    // A bare name is looked up in the backups folder.
+    let backup = if backup.components().count() == 1 {
+        dir.join(backup)
+    } else {
+        backup.to_owned()
+    };
+    ensure!(
+        backup.is_dir(),
+        "no backup at {} (list them with `snowctl house restore-prefix`)",
+        backup.display()
+    );
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(
+        out,
+        "Restore the house's prefix from {}{mode}",
+        backup.display()
+    )?;
+    if dry_run {
+        let running = executor::house_in_use(&record.prefix)?;
+        if !running.is_empty() {
+            writeln!(
+                out,
+                "  refused now: the house is in use ({})",
+                running.join(", ")
+            )?;
+        }
+        writeln!(
+            out,
+            "  move the current prefix aside to {}/prefix-replaced-<time>",
+            dir.display()
+        )?;
+        writeln!(
+            out,
+            "  copy the backup in its place (reflink when the disk allows)"
+        )?;
+        return Ok(());
+    }
+    let aside = executor::restore_prefix(&record.prefix, &backup, &dir)?;
+    writeln!(
+        out,
+        "Done. The prefix that was there is kept at {}",
+        aside.display()
+    )?;
+    writeln!(
+        out,
+        "The house still uses {}; switch with `snowctl house runtime set` if this backup was made under another Proton.",
         record.runtime_name
     )?;
     Ok(())
