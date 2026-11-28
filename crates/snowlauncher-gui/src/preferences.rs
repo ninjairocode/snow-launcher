@@ -284,6 +284,42 @@ fn icon_row(dialog: &adw::PreferencesDialog) -> adw::SwitchRow {
     row
 }
 
+/// "Start Snow at login": turns the `snowd` service on or off at login.
+/// Off, nothing of Snow runs until its window is opened (which starts it).
+fn startup_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
+    use snowlauncher_wine::user_service;
+    let installed = user_service::is_installed();
+    let row = adw::SwitchRow::builder()
+        .title("Start Snow at login")
+        .subtitle(if installed {
+            "The tray icon and the protections while you play (no suspend, lost \
+             connection warning) start with your session. Off, Snow starts when you \
+             open this window."
+        } else {
+            "The background service is not installed: run `snowctl service install`."
+        })
+        .active(installed && user_service::starts_at_login().unwrap_or(false))
+        .sensitive(installed)
+        .build();
+    let reverting = Rc::new(Cell::new(false));
+    let toasts = dialog.downgrade();
+    row.connect_active_notify(move |row| {
+        if reverting.get() {
+            return;
+        }
+        let Err(error) = user_service::set_starts_at_login(row.is_active()) else {
+            return;
+        };
+        reverting.set(true);
+        row.set_active(!row.is_active());
+        reverting.set(false);
+        toast(&toasts, format!("Could not change it: {error}"));
+    });
+    let group = adw::PreferencesGroup::builder().title("Startup").build();
+    group.add(&row);
+    group
+}
+
 /// Builds the dialog with the settings as they are now.
 pub fn dialog() -> adw::PreferencesDialog {
     let dialog = adw::PreferencesDialog::new();
@@ -315,6 +351,7 @@ pub fn dialog() -> adw::PreferencesDialog {
     ));
 
     let page = adw::PreferencesPage::new();
+    page.add(&startup_group(&dialog));
     page.add(&group);
 
     // Only with a house: there is nothing to set up without one.

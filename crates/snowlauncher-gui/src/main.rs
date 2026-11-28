@@ -29,6 +29,7 @@ use snowlauncher_core::install::InstallState;
 use snowlauncher_core::installer::OFFICIAL_DOWNLOAD_PAGE;
 use snowlauncher_wine::house::install_battlenet;
 use snowlauncher_wine::installer_cache::choose_installer;
+use snowlauncher_wine::user_service;
 
 use crate::state::{
     BattlenetView, GameCard, House, Illustration, SessionTracker, StatusRow, game_cards,
@@ -185,6 +186,8 @@ enum Msg {
     Preferences,
     InstallBattlenet,
     OpenDownloadPage,
+    /// Stop `snowd` and close the window. Battle.net stays open.
+    QuitSnow,
     ImportGame,
     /// A game was imported: read the library again.
     RefreshGames,
@@ -203,6 +206,8 @@ enum CommandOutput {
     Installing(InstallState, Duration),
     InstallFailed(String),
     Games(Vec<GameCard>),
+    SnowdStarted(Result<(), String>),
+    SnowStopped(Result<(), String>),
 }
 
 #[relm4::component]
@@ -227,10 +232,10 @@ impl Component for App {
                         set_sensitive: model.can_act(),
                         connect_clicked => Msg::OpenBattlenet,
                     },
-                    pack_end = &gtk::Button {
-                        set_icon_name: "preferences-system-symbolic",
-                        set_tooltip_text: Some("Preferences"),
-                        connect_clicked => Msg::Preferences,
+                    pack_end = &gtk::MenuButton {
+                        set_icon_name: "open-menu-symbolic",
+                        set_tooltip_text: Some("Main menu"),
+                        set_menu_model: Some(&main_menu()),
                     },
                 },
 
@@ -386,6 +391,19 @@ impl Component for App {
         };
         let games_list = model.games.widget();
         let widgets = view_output!();
+        add_app_actions(&sender);
+
+        // With "Start Snow at login" off, or after "Quit Snow Launcher",
+        // opening the window is what starts Snow again.
+        sender.spawn_oneshot_command(|| {
+            let result =
+                if user_service::is_installed() && !user_service::is_active().unwrap_or(true) {
+                    user_service::start().map_err(|error| error.to_string())
+                } else {
+                    Ok(())
+                };
+            CommandOutput::SnowdStarted(result)
+        });
         // The real scale is known once the window is on a monitor.
         let scale_sender = sender.input_sender().clone();
         root.connect_scale_factor_notify(move |window| {
@@ -465,6 +483,15 @@ impl Component for App {
     fn update(&mut self, message: Msg, sender: ComponentSender<Self>, root: &Self::Root) {
         match message {
             Msg::Preferences => preferences::dialog().present(Some(root)),
+            Msg::QuitSnow => {
+                sender.spawn_oneshot_command(|| {
+                    let result = match user_service::is_active() {
+                        Ok(true) => user_service::stop().map_err(|error| error.to_string()),
+                        _ => Ok(()),
+                    };
+                    CommandOutput::SnowStopped(result)
+                });
+            }
             Msg::InstallBattlenet => self.install(&sender),
             Msg::ImportGame => {
                 if let House::Ready { library, .. } = &self.house {
@@ -537,6 +564,20 @@ impl Component for App {
                 }
             }
             CommandOutput::Games(cards) => self.set_cards(cards),
+            CommandOutput::SnowdStarted(Err(problem)) => {
+                eprintln!("snow-launcher: could not start snowd: {problem}");
+            }
+            CommandOutput::SnowdStarted(Ok(())) => {}
+            CommandOutput::SnowStopped(Ok(())) => relm4::main_application().quit(),
+            CommandOutput::SnowStopped(Err(problem)) => {
+                let toast = adw::Toast::builder()
+                    .title(format!(
+                        "Could not stop Snow's background service: {problem}"
+                    ))
+                    .use_markup(false)
+                    .build();
+                widgets.toasts.add_toast(toast);
+            }
             CommandOutput::InstallFailed(text) => {
                 self.busy = false;
                 self.install = None;
@@ -618,6 +659,41 @@ fn texture(name: &str, bytes: &'static [u8], scale: i32) -> Option<gtk::gdk::Tex
     images::svg_texture(name, bytes, ILLUSTRATION_HEIGHT * scale)
 }
 
+/// The header's menu.
+fn main_menu() -> gtk::gio::Menu {
+    let menu = gtk::gio::Menu::new();
+    menu.append(Some("Preferences"), Some("app.preferences"));
+    let quit = gtk::gio::Menu::new();
+    quit.append(Some("Quit Snow Launcher"), Some("app.quit-snow"));
+    menu.append_section(None, &quit);
+    menu
+}
+
+/// The menu's actions, as messages to the window.
+fn add_app_actions(sender: &ComponentSender<App>) {
+    add_app_action(sender, "preferences", || Msg::Preferences);
+    add_app_action(sender, "quit-snow", || Msg::QuitSnow);
+}
+
+fn add_app_action(sender: &ComponentSender<App>, name: &str, message: fn() -> Msg) {
+    let action = gtk::gio::SimpleAction::new(name, None);
+    let input = sender.input_sender().clone();
+    action.connect_activate(move |_, _| input.emit(message()));
+    relm4::main_application().add_action(&action);
+}
+
 fn main() {
-    RelmApp::new(APP_ID).run::<App>(());
+    let relm = RelmApp::new(APP_ID);
+    // `snowd` activates this when the user quits Snow from the tray, so
+    // the window closes too.
+    let app = relm4::main_application();
+    let quit = gtk::gio::SimpleAction::new("quit", None);
+    let weak = app.downgrade();
+    quit.connect_activate(move |_, _| {
+        if let Some(app) = weak.upgrade() {
+            app.quit();
+        }
+    });
+    app.add_action(&quit);
+    relm.run::<App>(());
 }

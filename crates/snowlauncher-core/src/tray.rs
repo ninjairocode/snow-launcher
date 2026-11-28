@@ -19,6 +19,9 @@ pub enum TrayAction {
     },
     /// Close Battle.net the clean way; never while a game runs.
     QuitBattlenet,
+    /// Stop Snow itself (`snowd` and the window). Battle.net and the games
+    /// stay open.
+    QuitSnow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +61,8 @@ const SEPARATOR_ID: i32 = 5;
 const NO_GAMES_ID: i32 = 6;
 const QUIT_SEPARATOR_ID: i32 = 7;
 const QUIT_ID: i32 = 8;
+const QUIT_SNOW_SEPARATOR_ID: i32 = 9;
+const QUIT_SNOW_ID: i32 = 10;
 /// Games are numbered from here, in the order given.
 const FIRST_GAME_ID: i32 = 100;
 
@@ -156,6 +161,21 @@ pub fn tray_menu(state: MenuState<'_>, games: &[TrayGame]) -> Vec<MenuItem> {
             icon_png: None,
         },
     ];
+    let quit_snow = [
+        MenuItem {
+            id: QUIT_SNOW_SEPARATOR_ID,
+            label: String::new(),
+            enabled: true,
+            kind: MenuKind::Separator,
+            icon_png: None,
+        },
+        item(
+            QUIT_SNOW_ID,
+            "Quit Snow Launcher",
+            true,
+            Some(TrayAction::QuitSnow),
+        ),
+    ];
     if battlenet_running {
         menu.extend([
             MenuItem {
@@ -173,6 +193,7 @@ pub fn tray_menu(state: MenuState<'_>, games: &[TrayGame]) -> Vec<MenuItem> {
             ),
         ]);
     }
+    menu.extend(quit_snow);
     menu
 }
 
@@ -270,10 +291,14 @@ mod tests {
                 "Open Battle.net",
                 "Play",
                 "",
-                "Quit Battle.net"
+                "Quit Battle.net",
+                "",
+                "Quit Snow Launcher"
             ]
         );
         assert_eq!(action_for(&menu, QUIT_ID), Some(&TrayAction::QuitBattlenet));
+        assert_eq!(action_for(&menu, QUIT_SNOW_ID), Some(&TrayAction::QuitSnow));
+        assert_eq!(menu.last().map(|item| item.id), Some(QUIT_SNOW_ID));
         let game = find(&menu, FIRST_GAME_ID).unwrap();
         assert_eq!(game.icon_png.as_deref(), Some(&b"png"[..]));
         assert_eq!(action_for(&menu, STATUS_ID), None);
