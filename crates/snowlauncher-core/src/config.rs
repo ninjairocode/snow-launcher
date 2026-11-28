@@ -25,6 +25,11 @@
 //! # Proton to use. Defaults to the newest GE-Proton found.
 //! # runtime = "~/.local/share/Steam/compatibilitytools.d/GE-Proton11-14-x86_64"
 //!
+//! [startup]
+//! # Open Battle.net once per session, when Snow starts (at login, or when
+//! # its window starts it).
+//! open_battlenet = false
+//!
 //! [performance]
 //! # Your own MangoHud overlay in the games (from the next Battle.net start).
 //! mangohud = false
@@ -52,6 +57,7 @@ pub struct Config {
     pub display: DisplayConfig,
     pub house: HouseConfig,
     pub performance: PerformanceConfig,
+    pub startup: StartupConfig,
 }
 
 impl Default for Config {
@@ -63,6 +69,7 @@ impl Default for Config {
             display: DisplayConfig::default(),
             house: HouseConfig::default(),
             performance: PerformanceConfig::default(),
+            startup: StartupConfig::default(),
         }
     }
 }
@@ -82,6 +89,14 @@ pub struct SleepConfig {
 pub struct DisplayConfig {
     /// UI scale of the Battle.net app and installer (see `display`).
     pub ui_scale: UiScale,
+}
+
+/// What happens when Snow starts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct StartupConfig {
+    /// Open Battle.net once per session when `snowd` starts.
+    pub open_battlenet: bool,
 }
 
 /// Third-party tools the user installed, off by default (`project.md`,
@@ -283,6 +298,11 @@ mod tests {
         assert_eq!(loaded.config.house.runtime, None);
         assert!(loaded.warnings.is_empty());
         assert_eq!(loaded.config.performance, PerformanceConfig::default());
+
+        assert!(!loaded.config.startup.open_battlenet);
+        let loaded = parse("[startup]\nopen_battlenet = true\n").unwrap();
+        assert!(loaded.config.startup.open_battlenet);
+        assert!(loaded.warnings.is_empty());
 
         let loaded = parse("[performance]\nmangohud = true\ngamemode = true\n").unwrap();
         assert!(loaded.config.performance.mangohud && loaded.config.performance.gamemode);
