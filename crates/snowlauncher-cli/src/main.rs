@@ -157,6 +157,12 @@ enum HouseAction {
         /// Only show what would be done.
         #[arg(long)]
         dry_run: bool,
+
+        /// For a stuck house: close request, then SIGTERM, then SIGKILL
+        /// (through the house's wineserver), until it is empty. Still never
+        /// while a game runs.
+        #[arg(long)]
+        force: bool,
     },
     /// Hide or show Battle.net's icon in the desktop tray (Snow's own item
     /// replaces it), or show whether it is hidden.
@@ -268,8 +274,8 @@ fn main() -> Result<()> {
             action: HouseAction::RestorePrefix { backup, dry_run },
         } => house::restore_prefix(backup.as_deref(), dry_run, &mut io::stdout().lock()),
         Command::House {
-            action: HouseAction::Quit { dry_run },
-        } => house::quit(dry_run, &mut io::stdout().lock()),
+            action: HouseAction::Quit { dry_run, force },
+        } => house::quit(dry_run, force, &mut io::stdout().lock()),
         Command::House {
             action: HouseAction::Remove { dry_run },
         } => house::remove(dry_run, &mut io::stdout().lock()),

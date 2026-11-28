@@ -490,6 +490,76 @@ pub fn quit_battlenet(runner: &UmuRunner) -> Result<QuitOutcome, HouseError> {
     Ok(QuitOutcome::StillOpen)
 }
 
+/// The real house for [`snowlauncher_core::shutdown::force_quit`].
+struct WineHouse<'a> {
+    runner: &'a UmuRunner,
+}
+
+impl snowlauncher_core::shutdown::HouseControl for WineHouse<'_> {
+    type Error = HouseError;
+
+    fn blocking_programs(&mut self) -> Result<Vec<String>, HouseError> {
+        use snowlauncher_core::process::QuitDecision;
+        Ok(match quit_check(&self.runner.prefix)? {
+            QuitDecision::ProgramsRunning(names) => names,
+            QuitDecision::NotRunning | QuitDecision::Quit => Vec::new(),
+        })
+    }
+
+    fn running(&mut self) -> Result<Vec<String>, HouseError> {
+        house_in_use(&self.runner.prefix)
+    }
+
+    fn apply(&mut self, step: snowlauncher_core::shutdown::ForceStep) -> Result<(), HouseError> {
+        let failed = |problem: String| HouseError::Step {
+            step: format!("close the house ({step:?})"),
+            problem,
+        };
+        match step.wineserver_signal() {
+            // The exit status is not trusted either way: what counts is
+            // whether the house empties afterwards.
+            None => {
+                self.runner
+                    .run_alongside(&["taskkill", "/im", "Battle.net.exe"])
+                    .map_err(|error| failed(error.to_string()))?;
+            }
+            Some(signal) => {
+                // The runtime's own wineserver, for this prefix only.
+                let wineserver = self.runner.runtime.join("files/bin/wineserver");
+                std::process::Command::new(&wineserver)
+                    .arg(format!("-k{signal}"))
+                    .env("WINEPREFIX", &self.runner.prefix)
+                    .status()
+                    .map_err(|error| failed(format!("{}: {error}", wineserver.display())))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn wait_empty(&mut self, limit: std::time::Duration) -> Result<bool, HouseError> {
+        let started = std::time::Instant::now();
+        loop {
+            if house_in_use(&self.runner.prefix)?.is_empty() {
+                return Ok(true);
+            }
+            if started.elapsed() >= limit {
+                return Ok(false);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+}
+
+/// Empties the house when Battle.net does not close by itself (O15): a
+/// normal close request, then SIGTERM, then SIGKILL through the house's
+/// own `wineserver`. Stops before any step if a game, or a program that
+/// could be one, runs in the house.
+pub fn force_quit_house(
+    runner: &UmuRunner,
+) -> Result<snowlauncher_core::shutdown::ForceOutcome, HouseError> {
+    snowlauncher_core::shutdown::force_quit(&mut WineHouse { runner })
+}
+
 /// What [`play_game`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayRun {

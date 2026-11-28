@@ -617,7 +617,10 @@ pub fn battlenet_icon(action: IconAction, dry_run: bool, out: &mut impl io::Writ
 
 /// `snowctl house quit`: closes Battle.net the clean way (E10), never
 /// while a game runs in the house.
-pub fn quit(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+pub fn quit(dry_run: bool, force: bool, out: &mut impl io::Write) -> Result<()> {
+    if force {
+        return force_quit(dry_run, out);
+    }
     use snowlauncher_core::process::QuitDecision;
     let (house, runner) = house_runner()?;
     let mode = if dry_run {
@@ -651,9 +654,60 @@ pub fn quit(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
             names.join(", ")
         ),
         executor::QuitOutcome::StillOpen => anyhow::bail!(
-            "Battle.net was asked to close but is still open after {} s",
+            "Battle.net was asked to close but is still open after {} s; if it is stuck, \
+             `snowctl house quit --force` closes the house step by step",
             executor::QUIT_TIMEOUT.as_secs()
         ),
+    }
+    Ok(())
+}
+
+/// `snowctl house quit --force`: empties a stuck house step by step (O15),
+/// never while a game runs there.
+fn force_quit(dry_run: bool, out: &mut impl io::Write) -> Result<()> {
+    use snowlauncher_core::shutdown::{FORCE_STEPS, ForceOutcome, ForceStep};
+    let (house, runner) = house_runner()?;
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "Close everything in the house, step by step{mode}")?;
+    if dry_run {
+        let running = executor::house_in_use(&house.prefix)?;
+        if running.is_empty() {
+            writeln!(out, "  nothing runs in the house")?;
+            return Ok(());
+        }
+        writeln!(out, "  running: {}", running.join(", "))?;
+        for (step, wait) in FORCE_STEPS {
+            let what = match step {
+                ForceStep::Request => "ask Battle.net to close (taskkill without /f)",
+                ForceStep::Terminate => "SIGTERM through wineserver -k15",
+                ForceStep::Kill => "SIGKILL through wineserver -k",
+            };
+            writeln!(out, "  {what}, then wait up to {} s", wait.as_secs())?;
+        }
+        writeln!(out, "  (stops before any step if a game runs in the house)")?;
+        return Ok(());
+    }
+    match executor::force_quit_house(&runner)? {
+        ForceOutcome::AlreadyEmpty => writeln!(out, "Nothing runs in the house.")?,
+        ForceOutcome::Emptied(step) => {
+            let how = match step {
+                ForceStep::Request => "after the normal close request",
+                ForceStep::Terminate => "after SIGTERM",
+                ForceStep::Kill => "after SIGKILL",
+            };
+            writeln!(out, "The house is empty ({how}).")?;
+        }
+        ForceOutcome::ProgramsRunning(names) => anyhow::bail!(
+            "stopped: {} runs in the house; close it first",
+            names.join(", ")
+        ),
+        ForceOutcome::StillRunning(names) => {
+            anyhow::bail!("still running after SIGKILL: {}", names.join(", "))
+        }
     }
     Ok(())
 }
