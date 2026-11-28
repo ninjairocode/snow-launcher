@@ -584,6 +584,81 @@ pub fn force_quit_house(
     snowlauncher_core::shutdown::force_quit(&mut WineHouse { runner })
 }
 
+/// How often a running installation is looked at.
+pub const INSTALL_WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Installs Battle.net in the house with a **verified** installer (see
+/// `installer_cache::choose_installer`): checks the house first (it
+/// exists, has no Battle.net yet, nothing runs in it), starts the
+/// installer without the performance options (no overlay on it), and
+/// watches it until Battle.net opens or it is stuck, closed or too slow.
+/// `progress` sees every look, with the time since the start. Nothing is
+/// closed on failure: the windows stay for the user to see.
+pub fn install_battlenet(
+    installer: &Path,
+    mut progress: impl FnMut(&snowlauncher_core::install::InstallState, std::time::Duration),
+) -> Result<snowlauncher_core::install::InstallState, HouseError> {
+    use snowlauncher_core::house::{BATTLENET_DIR, BATTLENET_EXE};
+    use snowlauncher_core::install::{InstallLimits, InstallState, InstallWatch, Observation};
+    use snowlauncher_core::process::{ProcessRole, ProcessTable, processes_in_prefix};
+
+    let refuse = |problem: String| HouseError::Step {
+        step: "install Battle.net".to_owned(),
+        problem,
+    };
+    let (house, mut runner) = open_house().map_err(|error| refuse(error.to_string()))?;
+    if house.prefix.join(BATTLENET_EXE).exists() {
+        return Err(refuse(
+            "Battle.net is already installed in the house".to_owned(),
+        ));
+    }
+    let running = house_in_use(&house.prefix)?;
+    if !running.is_empty() {
+        return Err(refuse(format!(
+            "programs are running in the house ({}); close them first",
+            running.join(", ")
+        )));
+    }
+    runner.extra_env.clear();
+    runner.log = create_log_path().ok_or_else(|| refuse("no state folder".to_owned()))?;
+    let installer = fs::canonicalize(installer).map_err(io_err("read", installer))?;
+    let installer_name = installer
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut child = runner
+        .spawn(&[installer.as_os_str()])
+        .map_err(|error| refuse(format!("could not start the installer: {error}")))?;
+    // Reaped when it exits; it may outlive this function with Battle.net.
+    std::thread::spawn(move || child.wait());
+
+    let started = std::time::Instant::now();
+    let mut watch = InstallWatch::new(InstallLimits::default());
+    let bnet_dir = house.prefix.join(BATTLENET_DIR);
+    loop {
+        std::thread::sleep(INSTALL_WATCH_EVERY);
+        let processes = crate::procfs::ProcfsProcessTable::new()
+            .processes()
+            .map_err(|error| refuse(format!("could not list processes: {error}")))?;
+        let ours: Vec<_> = processes_in_prefix(&processes, &house.prefix).collect();
+        let observation = Observation {
+            elapsed: started.elapsed(),
+            installer_running: ours
+                .iter()
+                .any(|p| p.display_name().eq_ignore_ascii_case(&installer_name)),
+            battlenet_running: ours
+                .iter()
+                .any(|p| ProcessRole::of(p) == ProcessRole::BattleNet),
+            installed_bytes: dir_size(&bnet_dir),
+        };
+        let state = watch.observe(observation);
+        progress(&state, started.elapsed());
+        if !matches!(state, InstallState::Installing { .. }) {
+            return Ok(state);
+        }
+    }
+}
+
 /// What [`play_game`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayRun {

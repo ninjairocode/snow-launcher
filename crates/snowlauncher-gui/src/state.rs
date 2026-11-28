@@ -216,6 +216,51 @@ pub fn house_text(house: &House, battlenet: BattlenetView) -> (Illustration, &'s
     (illustration, title, text.to_owned())
 }
 
+/// Illustration, title and description while Battle.net is installed
+/// from the window.
+pub fn install_text(
+    state: &snowlauncher_core::install::InstallState,
+    elapsed: Duration,
+) -> (Illustration, &'static str, String) {
+    use snowlauncher_core::install::InstallState;
+    let secs = elapsed.as_secs();
+    let clock = format!("{}:{:02}", secs / 60, secs % 60);
+    let stopped = |why: &str| {
+        format!("{why}. Nothing was closed: check the installer window, then try again.")
+    };
+    match state {
+        InstallState::Installing { installed_bytes } => (
+            Illustration::Lights(1),
+            "Installing Battle.net…",
+            format!(
+                "{} MB so far ({clock}). Follow the installer window.",
+                installed_bytes / 1_000_000
+            ),
+        ),
+        InstallState::Done => (
+            Illustration::Lights(3),
+            "Battle.net is installed",
+            "Log in, then use \"Locate the game\" for games already in the library (G:)."
+                .to_owned(),
+        ),
+        InstallState::Stalled => (
+            Illustration::Empty,
+            "The installation stopped",
+            stopped("The installer made no progress for 5 minutes"),
+        ),
+        InstallState::ExitedWithoutBattlenet => (
+            Illustration::Empty,
+            "The installation stopped",
+            stopped("The installer closed but Battle.net did not open"),
+        ),
+        InstallState::TimedOut => (
+            Illustration::Empty,
+            "The installation stopped",
+            stopped("It took more than 30 minutes"),
+        ),
+    }
+}
+
 /// One game of the library, as its row shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameCard {
@@ -430,6 +475,23 @@ mod tests {
         assert_eq!(cards[0].launch_code.as_deref(), Some("WoWF"));
         assert!(cards[1].detail.contains("Open Battle.net once"));
         assert_eq!(cards[1].launch_code, None);
+    }
+
+    #[test]
+    fn install_texts() {
+        use snowlauncher_core::install::InstallState;
+        let (art, title, text) = install_text(
+            &InstallState::Installing {
+                installed_bytes: 250_000_000,
+            },
+            Duration::from_secs(78),
+        );
+        assert_eq!(art, Illustration::Lights(1));
+        assert_eq!(title, "Installing Battle.net…");
+        assert!(text.starts_with("250 MB so far (1:18)"), "{text}");
+        let (art, _, text) = install_text(&InstallState::Stalled, Duration::ZERO);
+        assert_eq!(art, Illustration::Empty);
+        assert!(text.contains("Nothing was closed"), "{text}");
     }
 
     #[test]

@@ -253,6 +253,7 @@ O Snow Launcher oferece três caminhos. O assistente de primeira execução perg
 - **A última cópia que passou na verificação fica guardada** em `~/.cache/snow-launcher/installer/` e é o **padrão** nas próximas instalações (recriar a casinha, por exemplo), sem baixar de novo. Um download mais novo e válido a substitui.
 - A versão do instalador quase não importa: depois de instalado, o Battle.net se atualiza sozinho.
 - `snowctl house installer status` mostra a cópia guardada e o que há em Downloads, já verificados.
+- **Na janela:** com a casinha sem Battle.net, os botões "Install Battle.net" (usa essa mesma escolha verificada e mostra o progresso com as luzinhas) e "Open download page". Testado numa casinha de teste: o instalador rodou, o Battle.net abriu e a cópia verificada foi guardada.
 
 **2 – Arquivo local**
 - `--installer PATH` (na janela, "Usar um arquivo meu"), também verificado. Se o arquivo indicado falhar, o Snow **não** troca por outro: para e explica.
