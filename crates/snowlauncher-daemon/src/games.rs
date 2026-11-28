@@ -8,7 +8,9 @@ use anyhow::{Context, Result};
 use snowlauncher_core::config::SleepConfig;
 use snowlauncher_core::desktop::{Notifier, SuspendInhibitor};
 use snowlauncher_core::network::NetworkMonitor;
-use snowlauncher_core::process::{Pid, ProcessTable, game_processes, game_titles};
+use snowlauncher_core::process::{
+    Pid, ProcessRole, ProcessTable, game_processes, game_titles, processes_in_prefix,
+};
 use snowlauncher_core::sleep::should_inhibit_suspend;
 use snowlauncher_core::tcp::SocketTable;
 use tokio::time::MissedTickBehavior;
@@ -113,6 +115,8 @@ where
     loop {
         ticker.tick().await;
         let processes = ProcessTable::processes(system).context("failed to list processes")?;
+        let battlenet = processes_in_prefix(&processes, prefix)
+            .any(|process| ProcessRole::of(process) == ProcessRole::BattleNet);
         let games = game_processes(&processes, prefix);
         let pids: Vec<Pid> = games.iter().map(|game| game.pid).collect();
         let titles = game_titles(games);
@@ -124,8 +128,10 @@ where
             let games: Vec<String> = titles.iter().map(|&title| title.to_owned()).collect();
             let changed = current.running_games != games
                 || current.suspend_inhibited != guard.is_inhibiting()
-                || current.game_connection != connections.state();
+                || current.game_connection != connections.state()
+                || current.battlenet_running != battlenet;
             if changed {
+                current.battlenet_running = battlenet;
                 current.running_games = games;
                 current.suspend_inhibited = guard.is_inhibiting();
                 current.game_connection = connections.state();

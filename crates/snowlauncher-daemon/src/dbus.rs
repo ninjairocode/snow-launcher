@@ -16,6 +16,9 @@ pub struct Status {
     pub running_games: Vec<String>,
     pub suspend_inhibited: bool,
     pub game_connection: GameConnection,
+    /// Battle.net's main process runs in the prefix. Internal for now
+    /// (the tray uses it); not on D-Bus.
+    pub battlenet_running: bool,
 }
 
 pub struct DaemonInterface {
