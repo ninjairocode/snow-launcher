@@ -242,6 +242,68 @@ pub fn quit_battlenet(runner: &UmuRunner) -> Result<QuitOutcome, HouseError> {
     Ok(QuitOutcome::StillOpen)
 }
 
+/// What [`play_game`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayRun {
+    /// Battle.net was open and logged in: the game was asked for at once.
+    Requested,
+    /// Battle.net was started, or still starting: the game was asked for
+    /// once it logged in.
+    RequestedAfterLogin,
+}
+
+/// How long [`play_game`] waits for Battle.net to log in. Long enough to
+/// type a password.
+pub const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Opens a game through Battle.net. `--exec=launch <code>` only works with
+/// Battle.net already open and logged in (E5): started together with it,
+/// Battle.net logs in, selects the game and stalls (O13). So: start
+/// Battle.net if needed, wait for its session to be ready (E10 markers),
+/// then ask for the game.
+pub fn play_game(runner: &UmuRunner, code: &str) -> Result<PlayRun, HouseError> {
+    use crate::battlenet_logs::{newest_session_log, session_stage};
+    use snowlauncher_core::battlenet_log::StartupStage;
+
+    let running = battlenet_pid(&runner.prefix)?.is_some();
+    // The newest log before starting Battle.net is an old session's.
+    let old_log = if running {
+        None
+    } else {
+        let old = newest_session_log(&runner.prefix);
+        run_battlenet(runner, &[])?;
+        old
+    };
+    let started = std::time::Instant::now();
+    let mut waited = false;
+    loop {
+        let ready = battlenet_pid(&runner.prefix)?.is_some()
+            && newest_session_log(&runner.prefix)
+                .filter(|log| Some(log) != old_log.as_ref())
+                .is_some_and(|log| session_stage(&log).is_ok_and(|s| s == StartupStage::Ready));
+        if ready {
+            break;
+        }
+        if started.elapsed() >= LOGIN_TIMEOUT {
+            return Err(HouseError::Step {
+                step: "wait for Battle.net to log in".to_owned(),
+                problem: format!(
+                    "not logged in after {} s; log in in Battle.net's window, then play again",
+                    LOGIN_TIMEOUT.as_secs()
+                ),
+            });
+        }
+        waited = true;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    run_battlenet(runner, &[launch_argument(code).as_str()])?;
+    Ok(if waited || !running {
+        PlayRun::RequestedAfterLogin
+    } else {
+        PlayRun::Requested
+    })
+}
+
 /// `--exec=launch <code>`, the argument that opens a game (E5).
 pub fn launch_argument(code: &str) -> String {
     format!("--exec=launch {code}")
@@ -797,6 +859,19 @@ mod tests {
     fn launch_argument_is_a_single_argument() {
         // One argv entry, as Battle.net expects `--exec="launch WoWF"`.
         assert_eq!(launch_argument("WoWF"), "--exec=launch WoWF");
+    }
+
+    #[test]
+    fn playing_needs_battlenet_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runner = UmuRunner {
+            umu_run: PathBuf::from("/nonexistent/umu-run"),
+            prefix: tmp.path().to_owned(),
+            runtime: PathBuf::from("/runtime"),
+            log: tmp.path().join("log"),
+        };
+        let error = play_game(&runner, "WoWF").unwrap_err().to_string();
+        assert!(error.contains("not installed"), "{error}");
     }
 
     #[test]

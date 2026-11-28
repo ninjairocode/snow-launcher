@@ -8,7 +8,7 @@ use snowlauncher_core::battlenet_log::StartupStage;
 use snowlauncher_core::dbus::GameConnection;
 use snowlauncher_core::house::BATTLENET_EXE;
 use snowlauncher_wine::daemon_client::DaemonState;
-use snowlauncher_wine::house::{BattlenetRun, load_record, record_path};
+use snowlauncher_wine::house::{BattlenetRun, PlayRun, load_record, record_path};
 use snowlauncher_wine::library::InstalledGame;
 
 // TODO(i18n): translate (pt-BR) once gettext is in place (v0.6).
@@ -242,12 +242,23 @@ pub fn game_cards(games: &[InstalledGame]) -> Vec<GameCard> {
         .collect()
 }
 
-/// The toast after an action (`what`: "Battle.net", "World of Warcraft").
-pub fn action_message(what: &str, result: &Result<BattlenetRun, String>) -> String {
+/// The toast after "Open Battle.net".
+pub fn open_message(result: &Result<BattlenetRun, String>) -> String {
     match result {
-        Ok(BattlenetRun::Started) => format!("Starting Battle.net for {what}…"),
-        Ok(BattlenetRun::PassedToRunning) => format!("{what}: request sent to Battle.net"),
-        Err(problem) => format!("Could not open {what}: {problem}"),
+        Ok(BattlenetRun::Started) => "Starting Battle.net…".to_owned(),
+        Ok(BattlenetRun::PassedToRunning) => "Battle.net: window brought back".to_owned(),
+        Err(problem) => format!("Could not open Battle.net: {problem}"),
+    }
+}
+
+/// The toast after "Play" on `game`.
+pub fn play_message(game: &str, result: &Result<PlayRun, String>) -> String {
+    match result {
+        Ok(PlayRun::Requested) => format!("{game}: asked Battle.net to open it"),
+        Ok(PlayRun::RequestedAfterLogin) => {
+            format!("{game}: Battle.net logged in, asked it to open the game")
+        }
+        Err(problem) => format!("Could not open {game}: {problem}"),
     }
 }
 
@@ -415,11 +426,17 @@ mod tests {
     #[test]
     fn action_messages() {
         assert_eq!(
-            action_message("World of Warcraft", &Ok(BattlenetRun::PassedToRunning)),
-            "World of Warcraft: request sent to Battle.net"
+            play_message("World of Warcraft", &Ok(PlayRun::Requested)),
+            "World of Warcraft: asked Battle.net to open it"
         );
         assert!(
-            action_message("Battle.net", &Err("umu-run not found".to_owned())).contains("umu-run")
+            play_message("World of Warcraft", &Ok(PlayRun::RequestedAfterLogin))
+                .contains("logged in")
+        );
+        assert!(open_message(&Err("umu-run not found".to_owned())).contains("umu-run"));
+        assert_eq!(
+            open_message(&Ok(BattlenetRun::Started)),
+            "Starting Battle.net…"
         );
     }
 }

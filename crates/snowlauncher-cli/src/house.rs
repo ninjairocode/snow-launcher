@@ -445,13 +445,31 @@ pub fn play(game: &str, dry_run: bool, out: &mut impl io::Write) -> Result<()> {
         )
     })?;
     let argument = launch_argument(code);
-    run_and_report(
-        &runner,
-        &[argument.as_str()],
-        &format!("Play {} ({argument})", found.name),
-        dry_run,
-        out,
-    )
+    let mode = if dry_run {
+        " (dry run: nothing is changed)"
+    } else {
+        ""
+    };
+    writeln!(out, "Play {} ({argument}){mode}", found.name)?;
+    if dry_run {
+        if executor::battlenet_pid(&runner.prefix)?.is_none() {
+            writeln!(out, "  start Battle.net")?;
+        }
+        writeln!(
+            out,
+            "  wait until Battle.net is logged in (up to {} s)",
+            executor::LOGIN_TIMEOUT.as_secs()
+        )?;
+        writeln!(out, "  ask it for the game")?;
+        return Ok(());
+    }
+    match executor::play_game(&runner, code)? {
+        executor::PlayRun::Requested => writeln!(out, "Asked Battle.net for the game.")?,
+        executor::PlayRun::RequestedAfterLogin => {
+            writeln!(out, "Battle.net is logged in; asked it for the game.")?
+        }
+    }
+    Ok(())
 }
 
 /// Stops with an explanation, leaving whatever is open for the user to see.

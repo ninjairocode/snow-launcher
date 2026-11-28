@@ -368,4 +368,5 @@ Também apareceu uma vez o `BLZBNTBGS80000011` (2026-11-23), ainda sem explicaç
 ### Consequências
 
 - Para "Jogar" com o Battle.net fechado, abrir o Battle.net primeiro, esperar o login (as marcas do E10) e só então pedir o jogo. A causa da parada (3) fica para um experimento próprio.
+  - **Feito** (`play_game`, usado pela GUI, pela bandeja e pelo `snowctl play`): com o Battle.net fechado, o Battle.net logou e o Snow pediu o jogo em 16 s; o WoW estava rodando em **18 s**.
 - Detectar um lançamento em andamento (pelo log) antes de fechar fica como melhoria do `quit`.
